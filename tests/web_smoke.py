@@ -1,9 +1,9 @@
-import subprocess,time,urllib.request,json,re,os,tempfile
+import subprocess,time,urllib.request,json,re,os,tempfile,sys
 from pathlib import Path
 root=str(Path(__file__).resolve().parent.parent)
 with tempfile.TemporaryDirectory() as temp:
     env=dict(os.environ,PYTHONPATH=root)
-    process=subprocess.Popen(['python3','-m','gang_edition','serve','--port','8766'],cwd=temp,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    process=subprocess.Popen([sys.executable,'-m','gang_edition','serve','--port','8766'],cwd=temp,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     try:
         for _ in range(30):
             try:

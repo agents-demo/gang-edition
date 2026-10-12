@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gang-edition"
+dynamic = ["version"]
+description = "The Gang Edition: local, review-first chat comics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "Pillow>=10.4,<13",
+]
+
+[project.scripts]
+gang-edition = "gang_edition.app:main"
+
+[tool.hatch.version]
+path = "gang_edition/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gang_edition"]

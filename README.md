@@ -6,41 +6,28 @@ This is a prototype for a presentation, not a hosted service. Your computer stor
 
 ## Choose how to try it
 
-- **Fast offline preview:** run `python -m gang_edition demo` or use the local web page's synthetic sample. No Telegram account, key, or real chat is needed.
+- **Fast offline preview:** run `uv run gang-edition demo` or use the local web page's synthetic sample. No Telegram account, key, or real chat is needed.
 - **Telegram group:** create a bot with BotFather, configure privacy, add it to the group, have members opt in, and leave the bot process running on your computer.
 - **WhatsApp export:** export a `.txt` chat, manually confirm the complete roster and consent, then prepare and review a comic locally.
 
 ## Step 1: Install the app
 
-You need Python 3.10 or newer and `pip`. The first installation needs internet to download Pillow; after that, the offline demo and local rendering can run without internet.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.10 or newer. The first install needs internet to download Pillow; after that, the offline demo and local rendering can run without internet.
 
-1. Download and unzip the project. Open a terminal in the `gang-edition` folder (the folder containing `requirements.txt`).
-2. Create and activate a virtual environment:
-
-   **macOS / Linux**
+1. Download and unzip the project. Open a terminal in the `gang-edition` folder (the folder containing `pyproject.toml`).
+2. Install uv if you do not have it (see <https://docs.astral.sh/uv/getting-started/installation/>). No other tool is required.
+3. Sync the project environment:
    ```sh
-   python3 -m venv .venv
-   source .venv/bin/activate
+   uv sync
    ```
-
-   **Windows PowerShell**
-   ```powershell
-   py -3 -m venv .venv
-   .venv\Scripts\Activate.ps1
-   ```
-   If PowerShell blocks activation, you can use `.venv\Scripts\python.exe` for the commands below instead of activating; do not change system-wide execution policy just for this prototype.
-
-3. Install the dependency:
-   ```sh
-   python -m pip install -r requirements.txt
-   ```
+   This creates a local `.venv`, installs Pillow, and installs the project itself. You do not need to activate the venv manually.
 4. Check the local build before using real messages:
    ```sh
-   python -m gang_edition demo
+   uv run gang-edition demo
    ```
-   This creates `demo-workspace/editions/2026-10-05/comic.png` and related files using fictional sample data. It auto-approves only that bundled sample. If you run it again, use a new directory, for example `python -m gang_edition demo --workspace another-demo`.
+   This creates `demo-workspace/editions/2026-10-05/comic.png` and related files using fictional sample data. It auto-approves only that bundled sample. If you run it again, use a new directory, for example `uv run gang-edition demo --workspace another-demo`.
 
-Use `python` after activation. On macOS/Linux, `python3` may be needed if you did not activate the environment. In the rest of this guide, commands assume the environment is active and you are in the project root.
+`uv run` executes each command inside the project environment, so there is no separate activation step. In the rest of this guide, commands use `uv run gang-edition` and assume you are in the project root.
 
 ## Telegram group setup (primary workflow)
 
@@ -105,7 +92,7 @@ Leave the AI key blank if you do not plan to use cloud mode. Never commit `.env`
 In the project root, run:
 
 ```sh
-python -m gang_edition telegram-run
+uv run gang-edition telegram-run
 ```
 
 Leave this terminal and computer running while the bot is collecting messages. The bot uses Telegram's official Bot API with long polling; it does not need a public server or webhook. When it starts, it checks the token and prints a warning if privacy mode appears to be on. If the token is missing or malformed, check that `.env` is in the project root and that the token was copied correctly.
@@ -152,19 +139,19 @@ There is also an optional cloud voice path. If every opted-in member sent `/clou
 The command-line tools are useful for seeing what the bot collected and for preparing or rendering outside the Telegram group. Run these from the project root, using the same workspace as `telegram-run` (the default is `workspace`):
 
 ```sh
-python -m gang_edition telegram-groups
+uv run gang-edition telegram-groups
 ```
 
 This lists group IDs and titles the bot has collected. Choose the numeric chat ID for a group, then prepare a draft for a week using an ISO date in that week:
 
 ```sh
-python -m gang_edition telegram-prepare --chat-id -1001234567890 --week 2026-10-05 --plan plan.json
+uv run gang-edition telegram-prepare --chat-id -1001234567890 --week 2026-10-05 --plan plan.json
 ```
 
 Open `plan.json` and review it. Edit `selected_ids` to choose one to six candidate message IDs and set `approved` to `true`. Only after your review, render the page:
 
 ```sh
-python -m gang_edition telegram-render --chat-id -1001234567890 --plan plan.json
+uv run gang-edition telegram-render --chat-id -1001234567890 --plan plan.json
 ```
 
 This CLI render saves locally; it does not post to Telegram. If new messages or consent changes invalidate the plan, prepare a fresh plan. Cloud selection can be requested with `--cloud`, but all opted-in members must have granted cloud permission and provider settings must be configured. The CLI cloud path does not transcribe voice.
@@ -172,7 +159,7 @@ This CLI render saves locally; it does not post to Telegram. If new messages or 
 To use the local review page, start the bot first so it has collected group messages, then run:
 
 ```sh
-python -m gang_edition serve
+uv run gang-edition serve
 ```
 
 Open **http://127.0.0.1:8765** in a browser on the same computer. Choose **Or load a group collected by the Telegram bot**, select a group, pick a week, prepare, review the quotes, and check the approval box before creating the comic. The page displays and downloads the local PNG/PDF; it never posts them to Telegram. It can also load a WhatsApp `.txt` export and fictional sample. For WhatsApp data, provide the consent JSON described below. The UI supports text exports only; use the CLI and media sidecars for WhatsApp images/voice notes.
@@ -184,10 +171,10 @@ The UI binds only to localhost. Do not expose it to a network, use it on a share
 The synthetic replay exercises the Telegram handler with a fake API and makes no Telegram network calls:
 
 ```sh
-python -m gang_edition telegram-demo
+uv run gang-edition telegram-demo
 ```
 
-It includes a member who never opts in, whose messages are excluded. The demo refuses to overwrite an existing workspace; use a fresh folder with `python -m gang_edition telegram-demo --workspace another-telegram-demo` if needed. It does not test a real bot token or live Telegram behavior.
+It includes a member who never opts in, whose messages are excluded. The demo refuses to overwrite an existing workspace; use a fresh folder with `uv run gang-edition telegram-demo --workspace another-telegram-demo` if needed. It does not test a real bot token or live Telegram behavior.
 
 ## Alternative workflow: WhatsApp text export
 
@@ -200,13 +187,13 @@ The WhatsApp route is an offline import. Unlike the Telegram bot's opt-in list, 
 5. Prepare, inspect, edit, approve, and render:
 
    ```sh
-   python -m gang_edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json
+   uv run gang-edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json
    ```
 
    Open `plan.json`. Review candidate messages; edit `selected_ids` to one to six unique source IDs and set `approved` to `true` only after review. The optional model only selects IDs; it does not write quotes or invent events. Each panel displays the original quote. Long quotes may be visibly abridged; the full quote remains in `transcript.txt`.
 
    ```sh
-   python -m gang_edition render --chat chat.txt --consent consent.json --date-order DMY --plan plan.json
+   uv run gang-edition render --chat chat.txt --consent consent.json --date-order DMY --plan plan.json
    ```
 
    Output is saved under `workspace/editions/<week>/`. Review the comic and confirm it is appropriate for the intended audience before sharing. The app never forwards or publishes a WhatsApp comic. Sensitive filtering is only a small English keyword/number heuristic, not a reliable privacy classifier. Human review is required in every language.
@@ -218,7 +205,7 @@ The app can use an OpenAI-compatible chat-completions API for **moment selection
 For the WhatsApp CLI, cloud selection requires a separate permission from every member recorded as `cloud_processing: true`, then an explicit `--cloud` flag:
 
 ```sh
-python -m gang_edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json --cloud
+uv run gang-edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json --cloud
 ```
 
 For Telegram, each opted-in member uses `/cloudok`, and an admin explicitly runs `/comic cloud`. A configured key does not switch on cloud mode by itself. Cloud selection sends up to 30 filtered candidate quotes, sender names, timestamps, and scores to the configured endpoint; it does not send the full export or image bytes. Telegram cloud voice transcription separately sends voice audio. Remote providers may retain content under their own policies and may charge for requests. Check provider and pricing before use. A local endpoint stays local only if that server does not relay traffic elsewhere.
@@ -251,7 +238,7 @@ For Telegram, each opted-in member uses `/cloudok`, and an admin explicitly runs
 
 ### `TELEGRAM_BOT_TOKEN is missing or malformed`
 
-- Make sure you are in the project root and `.env` is beside `requirements.txt`.
+- Make sure you are in the project root and `.env` is beside `pyproject.toml`.
 - Check that the line is exactly `TELEGRAM_BOT_TOKEN=...` with the full token from BotFather and no placeholder text. Do not put the token in quotes unless needed; the `.env` reader strips surrounding quotes.
 - If you set an old `TELEGRAM_BOT_TOKEN` in your shell, it overrides `.env`. Clear or correct that environment variable, then start the command again.
 - If you accidentally exposed the token, use BotFather to revoke/regenerate it and replace the value in `.env`.
@@ -261,7 +248,7 @@ For Telegram, each opted-in member uses `/cloudok`, and an admin explicitly runs
 - In BotFather, run `/setprivacy`, select this bot, and choose **Disable**.
 - Remove the bot from the group, then add it again. Changing privacy without re-adding may not update the bot's group permissions.
 - Alternatively, make it a group admin. Confirm it is still a member of the correct group.
-- Restart `python -m gang_edition telegram-run` and check `/status`. The app prints a startup warning when Telegram reports privacy mode on; `/status` also warns until normal messages have been seen.
+- Restart `uv run gang-edition telegram-run` and check `/status`. The app prints a startup warning when Telegram reports privacy mode on; `/status` also warns until normal messages have been seen.
 
 ### The bot sees only commands / `/status` still warns about privacy
 
@@ -278,8 +265,8 @@ A command-only group view is the usual sign that privacy mode remains enabled or
 ## Verify the local build
 
 ```sh
-python -m unittest discover -s tests -v
-python tests/web_smoke.py
+uv run python -m unittest discover -s tests -v
+uv run python tests/web_smoke.py
 ```
 
 Tests cover parser variants, media sidecars, consent and silent-member gates, source changes, review approval, week filtering, stable cast, safe media paths, sensitive filtering, memory, offline no-network behavior, Telegram update handling, and PNG/PDF production. The build also includes local-UI HTTP smoke checks and screenshots in `preview/`. No real friends' messages or likenesses are bundled. Passing tests do not establish that the live Telegram API or a paid provider works with your account.
