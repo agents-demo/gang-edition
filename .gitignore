@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.env
+workspace/
+web-workspace/
+demo-workspace/
+*.pyc

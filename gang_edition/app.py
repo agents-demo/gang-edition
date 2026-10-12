@@ -1,0 +1,87 @@
+import argparse
+import json
+import shutil
+import os
+from pathlib import Path
+from .core import load,save,parse_export,enrich,prepare,validate_plan,character_sheet,fingerprint,check_consent
+from .render import render_page
+
+ROOT=Path(__file__).resolve().parent.parent
+
+def read_source(chat, order, media_manifest=None, media_dir=None):
+    parsed=parse_export(Path(chat).read_text(encoding='utf-8-sig'),order)
+    if media_manifest:
+        enrich(parsed,load(media_manifest),media_dir or Path(chat).parent)
+    return parsed
+
+def finish(parsed,consent,plan,workspace,media_dir):
+    chosen=validate_plan(parsed,consent,plan)
+    workspace=Path(workspace)
+    sheet=character_sheet(consent['members'],load(workspace/'characters.json') if (workspace/'characters.json').exists() else {})
+    out=workspace/'editions'/plan['week']
+    render_page(chosen,sheet,plan['week'],out,media_dir)
+    save(out/'sources.json',chosen)
+    save(out/'reviewed-plan.json',plan)
+    (out/'transcript.txt').write_text('\n\n'.join(f"{m['timestamp']} | {m['author']}\n{m['text']}" for m in chosen),encoding='utf-8')
+    save(workspace/'characters.json',sheet)
+    memory=load(workspace/'memory.json') if (workspace/'memory.json').exists() else {}
+    memory['used_message_fingerprints']=sorted(set(memory.get('used_message_fingerprints',[]))|{fingerprint(m) for m in chosen})
+    memory['last_week']=plan['week']
+    save(workspace/'memory.json',memory)
+    return out
+
+def load_env():
+    # Small .env reader: literal KEY=VALUE, no shell evaluation or interpolation.
+    path=Path('.env')
+    if path.is_file():
+        for raw in path.read_text(encoding='utf-8').splitlines():
+            line=raw.strip()
+            if not line or line.startswith('#') or '=' not in line: continue
+            key,value=line.split('=',1)
+            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL'):
+                os.environ.setdefault(key.strip(),value.strip().strip("'\""))
+
+def main():
+    load_env()
+    p=argparse.ArgumentParser(description='The Gang Edition local MVP')
+    sub=p.add_subparsers(dest='command',required=True)
+    for name in ('prepare','render'):
+        c=sub.add_parser(name)
+        c.add_argument('--chat',required=True);c.add_argument('--consent',required=True)
+        c.add_argument('--date-order',choices=['DMY','MDY'],required=True)
+        c.add_argument('--workspace',default='workspace')
+        c.add_argument('--media-manifest');c.add_argument('--media-dir')
+        c.add_argument('--plan',required=True)
+        if name=='prepare':
+            c.add_argument('--week',required=True,help='ISO date in the desired Monday-Sunday week')
+            c.add_argument('--cloud',action='store_true',help='Explicit external API call; all members must consent')
+    demo=sub.add_parser('demo');demo.add_argument('--workspace',default='demo-workspace')
+    serve=sub.add_parser('serve');serve.add_argument('--port',type=int,default=8765)
+    args=p.parse_args()
+    try:
+        if args.command=='serve':
+            from .web import run
+            run(args.port);return
+        if args.command=='demo':
+            workspace=Path(args.workspace)
+            if workspace.exists():
+                raise ValueError('Demo workspace already exists. Choose a fresh directory or delete it deliberately.')
+            parsed=read_source(ROOT/'sample/chat.txt','DMY',ROOT/'sample/media.json',ROOT/'sample')
+            consent=load(ROOT/'sample/consent.json')
+            plan=prepare(parsed,consent,'2026-10-05',{})
+            plan['approved']=True # Only bundled synthetic demo data.
+            out=finish(parsed,consent,plan,workspace,ROOT/'sample')
+            print(f'Synthetic demo complete: {out}/comic.png');return
+        parsed=read_source(args.chat,args.date_order,args.media_manifest,args.media_dir)
+        consent=load(args.consent)
+        workspace=Path(args.workspace)
+        if args.command=='prepare':
+            memory=load(workspace/'memory.json') if (workspace/'memory.json').exists() else {}
+            plan=prepare(parsed,consent,args.week,memory,args.cloud)
+            save(args.plan,plan)
+            print(f'Review {args.plan}; select IDs and set approved=true. No comic rendered yet.')
+        else:
+            out=finish(parsed,consent,load(args.plan),workspace,args.media_dir or Path(args.chat).parent)
+            print(f'Rendered {out}/comic.png and comic.pdf')
+    except (ValueError,OSError,KeyError,TypeError) as e:
+        p.exit(2,f'Blocked: {e}\n')

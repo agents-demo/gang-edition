@@ -1,0 +1,130 @@
+{
+  "week": "2026-10-05",
+  "source_digest": "a7048051377aaf77295ae8e33baa299afc031d6ecfd4938318bfc644605858e5",
+  "consent_digest": "85f620950f6c8b185e0c2d723769fa2b581085e185ce9e1b578d4250203719e5",
+  "mode": "offline",
+  "candidates": [
+    {
+      "message_id": "m0009",
+      "score": 9.44,
+      "author": "Alex",
+      "quote": "Plot twist: wrong restaurant! I booked the one in another city.",
+      "timestamp": "2026-10-09T18:05:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0005",
+      "score": 5.49,
+      "author": "Maya",
+      "quote": "My balcony tomato finally turned red! One tomato. A farm empire begins.",
+      "timestamp": "2026-10-07T12:30:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0003",
+      "score": 5.42,
+      "author": "Sam",
+      "quote": "Finally ran five kilometres! My legs have filed a complaint.",
+      "timestamp": "2026-10-06T10:00:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0007",
+      "score": 5.41,
+      "author": "Jo",
+      "quote": "Won quiz night! Our prize is a mug that says third place.",
+      "timestamp": "2026-10-08T19:20:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0001",
+      "score": 5.31,
+      "author": "Alex",
+      "quote": "I booked the restaurant! Friday at seven.",
+      "timestamp": "2026-10-05T18:02:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0011",
+      "score": 4.04,
+      "author": "Sam",
+      "quote": "Haha. Local pizza is now our official backup strategy.",
+      "timestamp": "2026-10-09T18:07:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0008",
+      "score": 3.94,
+      "author": "Sam",
+      "quote": "A plot twist from the awards committee.",
+      "timestamp": "2026-10-08T19:22:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0014",
+      "score": 3.38,
+      "author": "Sam",
+      "quote": "Next week I volunteer to check the restaurant address twice.",
+      "timestamp": "2026-10-11T09:00:00",
+      "media_note": "supplied transcript"
+    },
+    {
+      "message_id": "m0012",
+      "score": 3.02,
+      "author": "Jo",
+      "quote": "Our backup pizza arrived! The dinner plan survived.",
+      "timestamp": "2026-10-10T11:02:00",
+      "media_note": "supplied image description"
+    },
+    {
+      "message_id": "m0002",
+      "score": 2.04,
+      "author": "Maya",
+      "quote": "Excellent. A plan with a reservation. We are evolving.",
+      "timestamp": "2026-10-05T18:04:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0010",
+      "score": 2.04,
+      "author": "Maya",
+      "quote": "We said dinner with a view, not dinner with a commute.",
+      "timestamp": "2026-10-09T18:06:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0004",
+      "score": 1.94,
+      "author": "Jo",
+      "quote": "Your legs need a union representative.",
+      "timestamp": "2026-10-06T10:03:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0006",
+      "score": 1.94,
+      "author": "Alex",
+      "quote": "We should issue shares in that tomato.",
+      "timestamp": "2026-10-07T12:35:00",
+      "media_note": null
+    },
+    {
+      "message_id": "m0013",
+      "score": 1.66,
+      "author": "Maya",
+      "quote": "Yesterday's pizza deserves a commemorative statue.",
+      "timestamp": "2026-10-10T11:03:00",
+      "media_note": null
+    }
+  ],
+  "selected_ids": [
+    "m0001",
+    "m0003",
+    "m0005",
+    "m0007",
+    "m0009",
+    "m0011"
+  ],
+  "approved": true,
+  "title": "The Gang Edition"
+}

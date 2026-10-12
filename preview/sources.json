@@ -1,0 +1,56 @@
+[
+  {
+    "id": "m0001",
+    "timestamp": "2026-10-05T18:02:00",
+    "author": "Alex",
+    "text": "I booked the restaurant! Friday at seven.",
+    "line": 2,
+    "attachment": null,
+    "media_only": false
+  },
+  {
+    "id": "m0003",
+    "timestamp": "2026-10-06T10:00:00",
+    "author": "Sam",
+    "text": "Finally ran five kilometres! My legs have filed a complaint.",
+    "line": 4,
+    "attachment": null,
+    "media_only": false
+  },
+  {
+    "id": "m0005",
+    "timestamp": "2026-10-07T12:30:00",
+    "author": "Maya",
+    "text": "My balcony tomato finally turned red! One tomato. A farm empire begins.",
+    "line": 6,
+    "attachment": null,
+    "media_only": false
+  },
+  {
+    "id": "m0007",
+    "timestamp": "2026-10-08T19:20:00",
+    "author": "Jo",
+    "text": "Won quiz night! Our prize is a mug that says third place.",
+    "line": 8,
+    "attachment": null,
+    "media_only": false
+  },
+  {
+    "id": "m0009",
+    "timestamp": "2026-10-09T18:05:00",
+    "author": "Alex",
+    "text": "Plot twist: wrong restaurant! I booked the one in another city.",
+    "line": 10,
+    "attachment": null,
+    "media_only": false
+  },
+  {
+    "id": "m0011",
+    "timestamp": "2026-10-09T18:07:00",
+    "author": "Sam",
+    "text": "Haha. Local pizza is now our official backup strategy.",
+    "line": 12,
+    "attachment": null,
+    "media_only": false
+  }
+]

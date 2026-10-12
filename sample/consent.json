@@ -1,0 +1,9 @@
+{
+  "roster_confirmed_complete": true,
+  "members": {
+    "Alex": {"local_processing": true, "comic_portrayal": true, "cloud_processing": false, "evidence": "SYNTHETIC DEMO ONLY. No real person."},
+    "Maya": {"local_processing": true, "comic_portrayal": true, "cloud_processing": false, "evidence": "SYNTHETIC DEMO ONLY. No real person."},
+    "Sam": {"local_processing": true, "comic_portrayal": true, "cloud_processing": false, "evidence": "SYNTHETIC DEMO ONLY. No real person."},
+    "Jo": {"local_processing": true, "comic_portrayal": true, "cloud_processing": false, "evidence": "SYNTHETIC DEMO ONLY. No real person."}
+  }
+}
