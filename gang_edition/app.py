@@ -38,7 +38,7 @@ def load_env():
             line=raw.strip()
             if not line or line.startswith('#') or '=' not in line: continue
             key,value=line.split('=',1)
-            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL'):
+            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL','TELEGRAM_BOT_TOKEN','GANG_TRANSCRIBE_MODEL','GANG_RETENTION_DAYS'):
                 os.environ.setdefault(key.strip(),value.strip().strip("'\""))
 
 def main():
@@ -57,11 +57,41 @@ def main():
             c.add_argument('--cloud',action='store_true',help='Explicit external API call; all members must consent')
     demo=sub.add_parser('demo');demo.add_argument('--workspace',default='demo-workspace')
     serve=sub.add_parser('serve');serve.add_argument('--port',type=int,default=8765)
+    tr=sub.add_parser('telegram-run',help='Run the Telegram group bot (long polling; needs TELEGRAM_BOT_TOKEN in .env)');tr.add_argument('--workspace',default='workspace')
+    td=sub.add_parser('telegram-demo',help='Replay a synthetic group through the Telegram handler with a fake API (no network)');td.add_argument('--workspace',default='telegram-demo-workspace')
+    tg=sub.add_parser('telegram-groups',help='List groups the bot has collected');tg.add_argument('--workspace',default='workspace')
+    for name in ('telegram-prepare','telegram-render'):
+        c=sub.add_parser(name);c.add_argument('--chat-id',required=True);c.add_argument('--workspace',default='workspace');c.add_argument('--plan',required=True)
+        if name=='telegram-prepare':
+            c.add_argument('--week',required=True);c.add_argument('--cloud',action='store_true')
     args=p.parse_args()
     try:
         if args.command=='serve':
             from .web import run
             run(args.port);return
+        if args.command=='telegram-run':
+            from .telegram import run as tg_run, TelegramError
+            try: tg_run(args.workspace)
+            except TelegramError as e: p.exit(2,f'Blocked: {e}\n')
+            return
+        if args.command=='telegram-demo':
+            from .telegram import demo as tg_demo
+            if Path(args.workspace).exists(): raise ValueError('Demo workspace already exists. Choose a fresh directory or delete it deliberately.')
+            tg_demo(args.workspace);return
+        if args.command=='telegram-groups':
+            from .telegram import Store
+            for g in Store(args.workspace).groups(): print(g)
+            return
+        if args.command in ('telegram-prepare','telegram-render'):
+            from .telegram import Store,build_inputs
+            store=Store(args.workspace);state=store.state(args.chat_id if not args.chat_id.lstrip('-').isdigit() else int(args.chat_id))
+            parsed,consent=build_inputs(state);wdir=store.dir(state['chat_id'])
+            if args.command=='telegram-prepare':
+                memory=load(wdir/'memory.json') if (wdir/'memory.json').exists() else {}
+                save(args.plan,prepare(parsed,consent,args.week,memory,args.cloud))
+                print(f'Review {args.plan}; select IDs and set approved=true. No comic rendered yet. Cloud mode never transcribes voice from the CLI.');return
+            out=finish(parsed,consent,load(args.plan),wdir,wdir)
+            print(f'Rendered {out}/comic.png and comic.pdf');return
         if args.command=='demo':
             workspace=Path(args.workspace)
             if workspace.exists():
