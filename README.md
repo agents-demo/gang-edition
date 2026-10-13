@@ -73,8 +73,8 @@ TELEGRAM_BOT_TOKEN=123456789:paste-your-botfather-token-here
 
 # Optional OpenAI-compatible chat API; leave empty for local/offline moment selection.
 GANG_LLM_API_KEY=
-GANG_LLM_BASE_URL=https://api.openai.com/v1
-GANG_LLM_MODEL=gpt-4o-mini
+GANG_LLM_BASE_URL=https://api.deepseek.com
+GANG_LLM_MODEL=deepseek-flash
 
 # Optional voice transcription model, used only with cloud mode.
 GANG_TRANSCRIBE_MODEL=whisper-1
@@ -200,7 +200,7 @@ The WhatsApp route is an offline import. Unlike the Telegram bot's opt-in list, 
 
 ## Optional AI provider settings
 
-The app can use an OpenAI-compatible chat-completions API for **moment selection only**. Set `GANG_LLM_API_KEY`, `GANG_LLM_BASE_URL`, and `GANG_LLM_MODEL` in `.env`. The API root should include `/v1` and omit `/chat/completions`; for example `https://api.openai.com/v1`. A local example is `http://127.0.0.1:11434/v1`. The remote URL must use HTTPS; HTTP is accepted only for a loopback local model. The local model must support chat completions and JSON-object response format. Some compatible providers do not; an incompatible response stops the run. Redirects are blocked to protect bearer credentials. The `.env` reader does not evaluate shell syntax or substitute variables.
+The app can use an OpenAI-compatible chat-completions API for **moment selection only**. Set `GANG_LLM_API_KEY`, `GANG_LLM_BASE_URL`, and `GANG_LLM_MODEL` in `.env`. The API root omits `/chat/completions` (the app appends it); for example `https://api.deepseek.com` with model `deepseek-flash`. A local example is `http://127.0.0.1:11434/v1`. The remote URL must use HTTPS; HTTP is accepted only for a loopback local model. The local model must support chat completions and JSON-object response format. Some compatible providers do not; an incompatible response stops the run. Redirects are blocked to protect bearer credentials. The `.env` reader does not evaluate shell syntax or substitute variables.
 
 For the WhatsApp CLI, cloud selection requires a separate permission from every member recorded as `cloud_processing: true`, then an explicit `--cloud` flag:
 
