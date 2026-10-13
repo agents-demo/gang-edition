@@ -2,7 +2,7 @@ import datetime as dt
 import textwrap
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-from .core import safe_media
+from .core import safe_media, PANELS_PER_PAGE
 from .styles import effective_style
 
 FONT_DIR = Path(__file__).resolve().parent / 'fonts'
@@ -170,6 +170,32 @@ def render_page(messages, sheet, week, out, media_dir, style=None):
     image.save(out / 'comic.png')
     image.save(out / 'comic.pdf', 'PDF', resolution=150)
     return out / 'comic.png'
+
+
+def _chunks(messages):
+    return [messages[i:i + PANELS_PER_PAGE] for i in range(0, len(messages), PANELS_PER_PAGE)]
+
+
+def save_pages(pages, out):
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    if len(pages) == 1:
+        pages[0].save(out / 'comic.png')
+        pages[0].save(out / 'comic.pdf', 'PDF', resolution=150)
+        return [out / 'comic.png']
+    pngs = []
+    for i, page in enumerate(pages, 1):
+        p = out / f'comic-{i}.png'
+        page.save(p)
+        pngs.append(p)
+    pages[0].save(out / 'comic.pdf', 'PDF', resolution=150, save_all=True, append_images=pages[1:])
+    return pngs
+
+
+def render_pages(messages, sheet, week, out, media_dir, style=None):
+    style = style or effective_style()
+    pages = [build_page(chunk, sheet, week, media_dir, style) for chunk in _chunks(messages)]
+    return save_pages(pages, out)
 
 
 def overlay_page(art, messages, sheet, week, style=None):

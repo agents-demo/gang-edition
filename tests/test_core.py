@@ -38,6 +38,11 @@ class TestGang(unittest.TestCase):
     def test_sensitive_excluded(self):
         p=parse_export('05/10/2026, 18:02 - Alex: My password is not for sharing!\n05/10/2026, 18:03 - Maya: haha pizza')
         self.assertEqual([m['author'] for m in candidates(p,'2026-10-05',{})],['Maya'])
+    def test_content_dedup_echo(self):
+        p=parse_export('05/10/2026, 18:02 - Alex: you should PR to the experimental branch\n05/10/2026, 18:03 - Maya: you should PR to the experimental branch')
+        self.assertEqual(len(candidates(p,'2026-10-05',{})),2)
+        mem={'used_content_hashes':[content_fingerprint(p['messages'][0])]}
+        self.assertEqual(candidates(p,'2026-10-05',mem),[])
     def test_review_gate(self):
         plan=prepare(self.parsed,self.consent,'2026-10-05',{})
         with self.assertRaises(GateError):validate_plan(self.parsed,self.consent,plan)
@@ -65,6 +70,24 @@ class TestGang(unittest.TestCase):
         sheet=character_sheet(['A','B'],existing)
         self.assertNotEqual((sheet['A']['color'],sheet['A']['hair'],sheet['A']['glasses']),
                             (sheet['B']['color'],sheet['B']['hair'],sheet['B']['glasses']))
+    def test_validate_plan_multi_page(self):
+        plan=prepare(self.parsed,self.consent,'2026-10-05',{})
+        cands=plan['candidates']
+        self.assertGreaterEqual(len(cands),7)
+        plan['approved']=True
+        plan['selected_ids']=[c['message_id'] for c in cands[:7]]
+        self.assertEqual(len(validate_plan(self.parsed,self.consent,plan)),7)
+    def test_multi_page_render(self):
+        from gang_edition.render import render_pages
+        from gang_edition.styles import resolve_style
+        msgs=[{'author':'A','timestamp':'2026-10-05T00:00:00','text':f'message number {i}','attachment':None} for i in range(7)]
+        sheet=character_sheet({'A':{},'B':{}},{})
+        with tempfile.TemporaryDirectory() as d:
+            pngs=render_pages(msgs,sheet,'2026-10-05',d,None,resolve_style('cartoon'))
+            self.assertEqual(len(pngs),2)
+            self.assertTrue((Path(d)/'comic-1.png').exists())
+            self.assertTrue((Path(d)/'comic-2.png').exists())
+            self.assertTrue((Path(d)/'comic.pdf').exists())
     def test_media_path(self):
         with self.assertRaises(ValueError):safe_media(ROOT/'sample','../.env')
     def test_media_enrichment(self):

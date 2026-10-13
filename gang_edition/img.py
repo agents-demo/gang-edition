@@ -89,19 +89,18 @@ def build_page_prompt(chosen, sheet, style, include_text=True):
 
 def render_image_page(chosen, sheet, plan, style, out):
     from PIL import Image
+    from .core import PANELS_PER_PAGE
+    from .render import save_pages, overlay_page
     hybrid = plan.get('img_mode') == 'hybrid'
-    prompt = build_page_prompt(chosen, sheet, style, include_text=not hybrid)
-    png = generate_image(
-        prompt,
-        resolution=os.getenv('GANG_IMG_RESOLUTION', '2K'),
-        aspect_ratio=os.getenv('GANG_IMG_ASPECT_RATIO', '2:3'),
-    )
-    image = Image.open(io.BytesIO(png)).convert('RGB')
-    if hybrid:
-        from .render import overlay_page
-        image = overlay_page(image, chosen, sheet, plan['week'], style)
-    out = Path(out)
-    out.mkdir(parents=True, exist_ok=True)
-    image.save(out / 'comic.png')
-    image.save(out / 'comic.pdf', 'PDF', resolution=150)
-    return out / 'comic.png'
+    resolution = os.getenv('GANG_IMG_RESOLUTION', '2K')
+    aspect_ratio = os.getenv('GANG_IMG_ASPECT_RATIO', '2:3')
+    pages = []
+    for i in range(0, len(chosen), PANELS_PER_PAGE):
+        chunk = chosen[i:i + PANELS_PER_PAGE]
+        prompt = build_page_prompt(chunk, sheet, style, include_text=not hybrid)
+        png = generate_image(prompt, resolution=resolution, aspect_ratio=aspect_ratio)
+        image = Image.open(io.BytesIO(png)).convert('RGB')
+        if hybrid:
+            image = overlay_page(image, chunk, sheet, plan['week'], style)
+        pages.append(image)
+    return save_pages(pages, out)

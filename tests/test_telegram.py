@@ -117,4 +117,30 @@ class T(unittest.TestCase):
         self.assertEqual(consent['members']['U1']['label'],'Dan')
         from gang_edition.core import character_sheet
         self.assertEqual(character_sheet(consent['members'],{})['U1']['label'],'Dan')
+    def test_approve_out_of_range_number(self):
+        self.optin(1,2);self.say(1,'Plot twist! wrong restaurant!!');self.say(2,'Finally won the quiz haha!')
+        self.say(1,'/comic')
+        self.say(1,'/approve 8 9')
+        self.assertIn('Numbers must be between 1 and',self.api.texts()[-1])
+        self.assertFalse([s for s in self.api.sent if s[0]=='photo'])
+    def test_approve_too_many_numbers(self):
+        self.optin(1,2);self.say(1,'Plot twist! wrong restaurant!!');self.say(2,'Finally won the quiz haha!')
+        self.say(1,'/comic')
+        self.say(1,'/approve 1 2 3 4 5 6 7 8 9 10 11 12 13')
+        self.assertIn('at most',self.api.texts()[-1])
+        self.assertFalse([s for s in self.api.sent if s[0]=='photo'])
+    def test_approve_duplicate_numbers(self):
+        self.optin(1,2);self.say(1,'Plot twist! wrong restaurant!!');self.say(2,'Finally won the quiz haha!')
+        self.say(1,'/comic')
+        self.say(1,'/approve 1 1')
+        self.assertIn('Do not repeat',self.api.texts()[-1])
+    def test_comic_consumes_unapproved_moments(self):
+        self.optin(1,2)
+        self.say(1,'first moment haha')
+        self.say(2,'second moment finally')
+        self.say(1,'third moment plot twist')
+        self.say(1,'/comic')
+        self.assertIn('Draft for the week',self.api.texts()[-1])
+        self.say(1,'/comic')
+        self.assertIn('No eligible moments',self.api.texts()[-1])
 if __name__=='__main__':unittest.main()

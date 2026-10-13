@@ -10,6 +10,9 @@ from pathlib import Path
 class GateError(ValueError):
     pass
 
+PANELS_PER_PAGE = 6
+MAX_MOMENTS = 12
+
 def load(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
@@ -130,9 +133,10 @@ def candidates(parsed, week, memory):
     end = start + dt.timedelta(days=7)
     week_msgs = [m for m in parsed['messages'] if start <= dt.date.fromisoformat(m['timestamp'][:10]) < end]
     prior = set(memory.get('used_message_fingerprints', []))
+    prior_content = set(memory.get('used_content_hashes', []))
     pool = []
     for i, msg in enumerate(week_msgs):
-        if not eligible(msg) or fingerprint(msg) in prior:
+        if not eligible(msg) or fingerprint(msg) in prior or content_fingerprint(msg) in prior_content:
             continue
         text = msg['text'].lower()
         score = 1 + min(len(text), 160)/160
@@ -145,6 +149,11 @@ def candidates(parsed, week, memory):
 
 def fingerprint(msg):
     return digest({k: msg[k] for k in ('timestamp', 'author', 'text')})
+
+def content_fingerprint(msg):
+    # Content-based identity: two messages with the same words (echoes, forwarded
+    # repeats) count as one already-seen moment regardless of who said it or when.
+    return digest(' '.join(str(msg['text']).split()))
 
 def cloud_select(pool):
     key = os.getenv('GANG_LLM_API_KEY')
@@ -189,8 +198,8 @@ def validate_plan(parsed, consent, plan):
         raise GateError('Review the plan and set approved=true before rendering.')
     ids = plan.get('selected_ids', [])
     allowed = {m['message_id'] for m in plan['candidates']}
-    if not 1 <= len(ids) <= 6 or len(set(ids)) != len(ids) or any(i not in allowed for i in ids):
-        raise GateError('Choose one to six unique IDs from the candidate list.')
+    if not 1 <= len(ids) <= MAX_MOMENTS or len(set(ids)) != len(ids) or any(i not in allowed for i in ids):
+        raise GateError(f'Choose one to {MAX_MOMENTS} unique IDs from the candidate list.')
     chosen = [next(m for m in parsed['messages'] if m['id'] == i) for i in ids]
     start = week_start(plan['week'])
     if any(not eligible(m) or not start <= dt.date.fromisoformat(m['timestamp'][:10]) < start + dt.timedelta(days=7) for m in chosen):

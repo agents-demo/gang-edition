@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .core import GateError, load, save, prepare, check_consent, digest
+from .core import GateError, load, save, prepare, check_consent, digest, fingerprint, content_fingerprint, MAX_MOMENTS, PANELS_PER_PAGE
 from .styles import STYLES, DEFAULT_STYLE, effective_style
 
 HELP = (
@@ -363,6 +363,10 @@ class Bot:
             plan['style'] = style.key
             plan['art_mode'] = art_mode
             plan['img_mode'] = os.getenv('GANG_IMG_MODE', 'full')
+            # Consume every proposed moment now, so a later /comic (even without
+            # /approve) starts from the next unused moments.
+            ids = {c['message_id'] for c in plan['candidates']}
+            self.consume(state, [m for m in parsed['messages'] if m['id'] in ids])
         except (GateError, ValueError, OSError, urllib.error.URLError, KeyError) as e:
             return reply(f'Blocked: {e}')
         state['pending'] = {'parsed': parsed, 'consent': consent, 'plan': plan}
@@ -371,7 +375,7 @@ class Bot:
         lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking, {style.name} style, {art}). * = proposed."]
         for i, c in enumerate(plan['candidates'][:12], 1):
             lines.append(f"{'*' if c['message_id'] in plan['selected_ids'] else ' '} {i}. {c['author']}: {c['quote'][:110]}")
-        lines.append('\nAdmin: /approve to use the starred moments, or /approve 2 4 5 (1-6 numbers). Everyone can /revoke before then.')
+        lines.append(f'\nAdmin: /approve to use the starred moments, or /approve 2 4 5 (1-{MAX_MOMENTS} numbers, up to {PANELS_PER_PAGE} per page). Everyone can /revoke before then.')
         reply('\n'.join(lines))
 
     def style(self, state, arg, reply):
@@ -407,24 +411,49 @@ class Bot:
         p = self.store.dir(state['chat_id']) / 'memory.json'
         return load(p) if p.exists() else {}
 
+    def consume(self, state, messages):
+        if not messages:
+            return
+        p = self.store.dir(state['chat_id']) / 'memory.json'
+        memory = load(p) if p.exists() else {}
+        memory['used_message_fingerprints'] = sorted(set(memory.get('used_message_fingerprints', [])) | {fingerprint(m) for m in messages})
+        memory['used_content_hashes'] = sorted(set(memory.get('used_content_hashes', [])) | {content_fingerprint(m) for m in messages})
+        save(p, memory)
+
     def approve(self, state, msg, arg, reply):
         from .app import finish
         pend = state.get('pending')
         if not pend:
             return reply('Nothing to approve. Run /comic first.')
         plan = pend['plan']
+        candidates = plan['candidates']
+        if arg:
+            nums = [int(x) for x in re.findall(r'\d+', arg)]
+            if not nums:
+                return reply(f'Use /approve alone, or /approve 2 4 5 (choose up to {MAX_MOMENTS} numbers).')
+            if len(nums) > MAX_MOMENTS:
+                return reply(f'Choose at most {MAX_MOMENTS} moments; you gave {len(nums)}.')
+            if any(n < 1 or n > len(candidates) for n in nums):
+                return reply(f'Numbers must be between 1 and {len(candidates)}.')
+            if len(set(nums)) != len(nums):
+                return reply('Do not repeat a number; choose distinct moments.')
+            plan['selected_ids'] = [candidates[n - 1]['message_id'] for n in nums]
+        plan['approved'] = True
         try:
-            if arg:
-                nums = [int(x) for x in re.findall(r'\d+', arg)]
-                plan['selected_ids'] = [plan['candidates'][n - 1]['message_id'] for n in nums]
-            plan['approved'] = True
             _, consent_now = build_inputs(state)  # latest opt-ins: any change blocks the old draft
             out = finish(pend['parsed'], consent_now, plan, self.store.dir(state['chat_id']), self.store.dir(state['chat_id']))
         except (GateError, ValueError, IndexError, OSError) as e:
             return reply(f'Blocked: {e}')
         state['pending'] = None
         self.store.save(state)
-        self.api.send_photo(state['chat_id'], out / 'comic.png', 'The Gang Edition. Draft approved by an admin.')
+        pngs = sorted(out.glob('comic-*.png'))
+        if not pngs:
+            pngs = [out / 'comic.png']
+        for idx, p in enumerate(pngs, 1):
+            caption = 'The Gang Edition. Draft approved by an admin.'
+            if len(pngs) > 1:
+                caption += f' ({idx}/{len(pngs)})'
+            self.api.send_photo(state['chat_id'], p, caption)
         self.api.send_document(state['chat_id'], out / 'comic.pdf', 'Printable page')
 
 

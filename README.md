@@ -132,8 +132,8 @@ An administrator of the Telegram group runs the selection and posting commands. 
 
 1. An admin sends **`/comic`** to prepare the current week, or **`/comic 2026-10-05`** to choose the Monday-through-Sunday week containing that date. Use an ISO date (`YYYY-MM-DD`). Add the word `cloud` only when everyone opted in to cloud processing and you intend to use the configured provider: `/comic cloud` or `/comic 2026-10-05 cloud`. Add a style name to pick the look, e.g. `/comic cloud marvel`. If a style is not given, the group default (or `GANG_DEFAULT_STYLE`, then `marvel`) is used. An admin sets the group default with `/style ghibli` and lists styles with `/styles`.
 2. The bot replies with candidate moments. A `*` marks a proposed selection. Read the quotes in the group and remove anything private, sensitive, misleading, or unsuitable for the intended audience. Everyone may still use `/revoke` before approval.
-3. An admin sends **`/approve`** to draw the starred moments, or **`/approve 2 4 5`** to choose numbered moments from the list. The number choices are positions in the displayed list; select no more than six. This is the step that posts the resulting PNG and PDF to the group. Nothing is posted as a comic before an admin approves it.
-4. Used moments are remembered locally to reduce repeats in later weeks. Review each week's draft; deduplication is not a substitute for human review.
+3. An admin sends **`/approve`** to draw the starred moments, or **`/approve 2 4 5`** to choose numbered moments from the list. The number choices are positions in the displayed list; select up to twelve moments. Up to six appear per page; more than six are split into additional pages, each posted as its own image, with one combined PDF. This is the step that posts the resulting images and PDF to the group. Nothing is posted as a comic before an admin approves it.
+4. Every moment proposed by `/comic` is remembered locally as soon as the draft is shown, whether or not an admin approves it. A later `/comic` starts from the next unused moments, so a proposal never repeats. Deduplication is not a substitute for human review; to reuse past moments, clear the group's `memory.json`.
 
 For an offline workflow with the collected Telegram messages, see [Telegram CLI and local web UI](#telegram-cli-and-local-web-ui). The computer running the bot must stay on to collect messages; the 24-hour missed-updates window still applies even if an admin later uses the local UI.
 
@@ -162,7 +162,7 @@ This lists group IDs and titles the bot has collected. Choose the numeric chat I
 uv run gang-edition telegram-prepare --chat-id -1001234567890 --week 2026-10-05 --plan plan.json
 ```
 
-Open `plan.json` and review it. Edit `selected_ids` to choose one to six candidate message IDs and set `approved` to `true`. Only after your review, render the page:
+Open `plan.json` and review it. Edit `selected_ids` to choose one to twelve candidate message IDs and set `approved` to `true`. Only after your review, render the page:
 
 ```sh
 uv run gang-edition telegram-render --chat-id -1001234567890 --plan plan.json
@@ -204,7 +204,7 @@ The WhatsApp route is an offline import. Unlike the Telegram bot's opt-in list, 
    uv run gang-edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json
    ```
 
-   Open `plan.json`. Review candidate messages; edit `selected_ids` to one to six unique source IDs and set `approved` to `true` only after review. The optional model only selects IDs; it does not write quotes or invent events. Each panel displays the original quote. Long quotes may be visibly abridged; the full quote remains in `transcript.txt`.
+   Open `plan.json`. Review candidate messages; edit `selected_ids` to one to twelve unique source IDs and set `approved` to `true` only after review. The optional model only selects IDs; it does not write quotes or invent events. Each panel displays the original quote. Long quotes may be visibly abridged; the full quote remains in `transcript.txt`. More than six selected moments are split across multiple pages.
 
    ```sh
    uv run gang-edition render --chat chat.txt --consent consent.json --date-order DMY --plan plan.json
@@ -239,7 +239,7 @@ To choose a style, pass it in the command (`/comic cloud marvel`) or set the gro
 
 - Telegram bot state is stored under `workspace/telegram/<chat id>/`. Group messages, consent state, pending drafts, and deduplication memory are plain, unencrypted files. Old Telegram text is pruned using `GANG_RETENTION_DAYS` (default 35); pruning is not secure deletion.
 - `workspace/characters.json` stores each character's color, skin tone, hair, glasses, and display label. It is generated deterministically on first use and reused, with a guaranteed-distinct appearance per member. These stylized avatars are placeholders, not guesses about anyone's appearance, identity, gender, or ethnicity. An admin can override a member's display label in the Telegram bot with `/rename <name> <label>`.
-- `workspace/memory.json` remembers used message fingerprints and the last week to reduce repeats. It is deduplication memory, not semantic memory of relationships or inside jokes. The local UI keeps its own data in `web-workspace`.
+- `workspace/memory.json` remembers used message fingerprints (exact and by text content) and the last week to reduce repeats. It is deduplication memory, not semantic memory of relationships or inside jokes. Every proposed moment is marked used when a draft is prepared. The local UI keeps its own data in `web-workspace`.
 - Use one workspace per group. Rerendering the same week replaces that edition folder. Prior downloaded or shared output files cannot be recalled.
 - To remove data, stop the app and delete that group's workspace folder, exports, media, plans, consent notes, and any downloaded copies you want removed. The app has no automatic retention scheduler for WhatsApp exports or UI data.
 

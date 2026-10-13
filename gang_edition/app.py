@@ -3,8 +3,8 @@ import json
 import shutil
 import os
 from pathlib import Path
-from .core import load,save,parse_export,enrich,prepare,validate_plan,character_sheet,fingerprint,check_consent
-from .render import render_page
+from .core import load,save,parse_export,enrich,prepare,validate_plan,character_sheet,fingerprint,content_fingerprint,check_consent
+from .render import render_pages
 from .styles import effective_style
 
 ROOT=Path(__file__).resolve().parent.parent
@@ -25,13 +25,14 @@ def finish(parsed,consent,plan,workspace,media_dir):
         from .img import render_image_page
         render_image_page(chosen,sheet,plan,style,out)
     else:
-        render_page(chosen,sheet,plan['week'],out,media_dir,style)
+        render_pages(chosen,sheet,plan['week'],out,media_dir,style)
     save(out/'sources.json',chosen)
     save(out/'reviewed-plan.json',plan)
     (out/'transcript.txt').write_text('\n\n'.join(f"{m['timestamp']} | {m['author']}\n{m['text']}" for m in chosen),encoding='utf-8')
     save(workspace/'characters.json',sheet)
     memory=load(workspace/'memory.json') if (workspace/'memory.json').exists() else {}
     memory['used_message_fingerprints']=sorted(set(memory.get('used_message_fingerprints',[]))|{fingerprint(m) for m in chosen})
+    memory['used_content_hashes']=sorted(set(memory.get('used_content_hashes',[]))|{content_fingerprint(m) for m in chosen})
     memory['last_week']=plan['week']
     save(workspace/'memory.json',memory)
     return out
