@@ -21,11 +21,16 @@ def finish(parsed,consent,plan,workspace,media_dir):
     sheet=character_sheet(consent['members'],load(workspace/'characters.json') if (workspace/'characters.json').exists() else {})
     out=workspace/'editions'/plan['week']
     style=effective_style(plan.get('style'))
+    chosen_ids=[m['id'] for m in chosen]
+    if plan.get('mode')=='cloud' and sorted(chosen_ids)!=sorted(plan.get('title_source_ids',[])):
+        from .core import summarize
+        meta=summarize(chosen)
+        plan['title']=meta['title'];plan['summary']=meta['summary'];plan['title_source_ids']=list(chosen_ids)
     if plan.get('art_mode')=='image':
         from .img import render_image_page
         render_image_page(chosen,sheet,plan,style,out)
     else:
-        render_pages(chosen,sheet,plan['week'],out,media_dir,style)
+        render_pages(chosen,sheet,plan['week'],out,media_dir,style,title=plan.get('title','The Gang Edition'),summary=plan.get('summary','A week worth keeping'))
     save(out/'sources.json',chosen)
     save(out/'reviewed-plan.json',plan)
     (out/'transcript.txt').write_text('\n\n'.join(f"{m['timestamp']} | {m['author']}\n{m['text']}" for m in chosen),encoding='utf-8')
@@ -45,8 +50,9 @@ def load_env():
             line=raw.strip()
             if not line or line.startswith('#') or '=' not in line: continue
             key,value=line.split('=',1)
-            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL','TELEGRAM_BOT_TOKEN','GANG_TRANSCRIBE_MODEL','GANG_RETENTION_DAYS',
+            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL','TELEGRAM_BOT_TOKEN','GANG_TRANSCRIBE_MODEL','GANG_TRANSCRIBE_API_KEY','GANG_TRANSCRIBE_BASE_URL','GANG_RETENTION_DAYS',
                                'GANG_IMG_API_KEY','GANG_IMG_BASE_URL','GANG_IMG_MODEL','GANG_IMG_MODE','GANG_IMG_RESOLUTION','GANG_IMG_ASPECT_RATIO',
+                               'GANG_IMG_READER_API_KEY','GANG_IMG_READER_BASE_URL','GANG_IMG_READER_MODEL',
                                'GANG_DEFAULT_STYLE'):
                 os.environ.setdefault(key.strip(),value.strip().strip("'\""))
 
@@ -100,7 +106,7 @@ def main():
                 save(args.plan,prepare(parsed,consent,args.week,memory,args.cloud))
                 print(f'Review {args.plan}; select IDs and set approved=true. No comic rendered yet. Cloud mode never transcribes voice from the CLI.');return
             out=finish(parsed,consent,load(args.plan),wdir,wdir)
-            print(f'Rendered {out}/comic.png and comic.pdf');return
+            print(f'Rendered {out} ({", ".join(p.name for p in sorted(out.glob("comic*.png")))} and comic.pdf)');return
         if args.command=='demo':
             workspace=Path(args.workspace)
             if workspace.exists():
@@ -110,7 +116,7 @@ def main():
             plan=prepare(parsed,consent,'2026-10-05',{})
             plan['approved']=True # Only bundled synthetic demo data.
             out=finish(parsed,consent,plan,workspace,ROOT/'sample')
-            print(f'Synthetic demo complete: {out}/comic.png');return
+            print(f'Synthetic demo complete: {out} ({", ".join(p.name for p in sorted(out.glob("comic*.png")))} and comic.pdf)');return
         parsed=read_source(args.chat,args.date_order,args.media_manifest,args.media_dir)
         consent=load(args.consent)
         workspace=Path(args.workspace)
@@ -121,6 +127,6 @@ def main():
             print(f'Review {args.plan}; select IDs and set approved=true. No comic rendered yet.')
         else:
             out=finish(parsed,consent,load(args.plan),workspace,args.media_dir or Path(args.chat).parent)
-            print(f'Rendered {out}/comic.png and comic.pdf')
+            print(f'Rendered {out} ({", ".join(p.name for p in sorted(out.glob("comic*.png")))} and comic.pdf)')
     except (ValueError,OSError,KeyError,TypeError) as e:
         p.exit(2,f'Blocked: {e}\n')

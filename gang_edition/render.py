@@ -80,6 +80,16 @@ def portrait(draw, cx, cy, r, character, ink):
     draw.arc((cx - int(r * 0.3), cy - int(r * 0.05), cx + int(r * 0.3), cy + int(r * 0.4)), 10, 170, fill=ink, width=2)
 
 
+def character_card(character, size=384):
+    image = Image.new('RGB', (size, size), '#ffffff')
+    draw = ImageDraw.Draw(image)
+    r = int(size * 0.30)
+    cx = size // 2
+    cy = int(size * 0.44)
+    portrait(draw, cx, cy, r, character, '#191019')
+    return image
+
+
 def name_chip(draw, x, y, character, label, ink):
     face = font(20, 'DejaVuSans-Bold.ttf')
     tw = draw.textlength(label, font=face)
@@ -114,7 +124,25 @@ def _panels(messages):
         yield msg, 70 + col * 643, 256 + row * 495, 617, 468
 
 
-def build_page(messages, sheet, week, media_dir, style=None, background=None):
+def _fit_title(draw, style, title, max_width=1150):
+    size = int(58 * style.title_scale)
+    while size > 28:
+        face = font(size, style.title_font)
+        if draw.textlength(title, font=face) <= max_width:
+            return face
+        size -= 2
+    return font(28, style.title_font)
+
+
+def _fit_text(draw, text, face, width):
+    if draw.textlength(text, font=face) <= width:
+        return text
+    while text and draw.textlength(text + '...', font=face) > width:
+        text = text[:-1]
+    return text + '...'
+
+
+def build_page(messages, sheet, week, media_dir, style=None, background=None, title='The Gang Edition', summary='A week worth keeping'):
     style = style or effective_style()
     height = 415 + 495 * ((len(messages) + 1) // 2)
     image = Image.new('RGB', (1400, height), style.page_bg)
@@ -130,12 +158,13 @@ def build_page(messages, sheet, week, media_dir, style=None, background=None):
 
     if style.halftone:
         halftone(draw, 0, 20, 1400, 48, style.accent, spacing=13, radius=3)
-    title_face = font(int(58 * style.title_scale), style.title_font)
-    draw.text((70, 63), 'THE GANG EDITION', font=title_face, fill=style.title_color)
+    title_face = _fit_title(draw, style, title)
+    draw.text((70, 63), title, font=title_face, fill=style.title_color)
     if style.action_lines:
         action_lines(draw, 1290, 110, style.accent)
     end = (dt.date.fromisoformat(week) + dt.timedelta(days=6)).isoformat()
-    draw.text((74, 141), f'{week} to {end}  |  A week worth keeping', font=font(24, style.body_font), fill=style.subtitle_color)
+    sub = _fit_text(draw, f'{week} to {end}  |  {summary}', font(24, style.body_font), 1180)
+    draw.text((74, 141), sub, font=font(24, style.body_font), fill=style.subtitle_color)
     draw.text((74, 182), 'Illustrated recap. Reviewed source text. Private by default.', font=font(22, style.body_font), fill=style.subtitle_color)
     draw.line((70, 226, 1330, 226), fill=style.ink, width=3)
 
@@ -162,9 +191,9 @@ def build_page(messages, sheet, week, media_dir, style=None, background=None):
     return image
 
 
-def render_page(messages, sheet, week, out, media_dir, style=None):
+def render_page(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping'):
     style = style or effective_style()
-    image = build_page(messages, sheet, week, media_dir, style)
+    image = build_page(messages, sheet, week, media_dir, style, title=title, summary=summary)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     image.save(out / 'comic.png')
@@ -192,12 +221,12 @@ def save_pages(pages, out):
     return pngs
 
 
-def render_pages(messages, sheet, week, out, media_dir, style=None):
+def render_pages(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping'):
     style = style or effective_style()
-    pages = [build_page(chunk, sheet, week, media_dir, style) for chunk in _chunks(messages)]
+    pages = [build_page(chunk, sheet, week, media_dir, style, title=title, summary=summary) for chunk in _chunks(messages)]
     return save_pages(pages, out)
 
 
-def overlay_page(art, messages, sheet, week, style=None):
+def overlay_page(art, messages, sheet, week, style=None, title='The Gang Edition', summary='A week worth keeping'):
     style = style or effective_style()
-    return build_page(messages, sheet, week, None, style, background=art)
+    return build_page(messages, sheet, week, None, style, background=art, title=title, summary=summary)

@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .core import GateError, load, save, prepare, check_consent, digest, fingerprint, content_fingerprint, MAX_MOMENTS, PANELS_PER_PAGE
+from .core import GateError, load, save, prepare, check_consent, digest, fingerprint, content_fingerprint, describe_image, MAX_MOMENTS, PANELS_PER_PAGE
 from .styles import STYLES, DEFAULT_STYLE, effective_style
 
 HELP = (
@@ -198,10 +198,10 @@ def build_inputs(state):
 def transcribe_voice(api, file_id, filename='voice.ogg'):
     """Optional: send a voice file to an OpenAI-compatible /audio/transcriptions endpoint. Caller must have
     verified every member's cloud consent first."""
-    key = os.getenv('GANG_LLM_API_KEY')
+    key = os.getenv('GANG_TRANSCRIBE_API_KEY') or os.getenv('GANG_LLM_API_KEY')
     if not key:
-        raise GateError('GANG_LLM_API_KEY is not set; voice transcription is unavailable.')
-    base = os.getenv('GANG_LLM_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
+        raise GateError('GANG_TRANSCRIBE_API_KEY (or GANG_LLM_API_KEY) is not set; voice transcription is unavailable.')
+    base = (os.getenv('GANG_TRANSCRIBE_BASE_URL') or os.getenv('GANG_LLM_BASE_URL', 'https://api.openai.com/v1')).rstrip('/')
     u = urllib.parse.urlparse(base)
     if u.scheme != 'https' and not (u.scheme == 'http' and u.hostname in ('localhost', '127.0.0.1', '::1')):
         raise GateError('Use HTTPS for a cloud provider, or HTTP for a loopback-only local model.')
@@ -250,7 +250,13 @@ class Bot:
             v = msg.get('voice') or msg['audio']
             state['messages'].append(self.record(msg, user, '', 'voice', file_id=v['file_id']))
         elif 'photo' in msg or 'video' in msg or 'video_note' in msg:
-            state['messages'].append(self.record(msg, user, msg.get('caption', ''), 'photo' if 'photo' in msg else 'video'))
+            if 'photo' in msg:
+                file_id = msg['photo'][-1]['file_id']; kind = 'photo'
+            elif 'video' in msg:
+                file_id = msg['video']['file_id']; kind = 'video'
+            else:
+                file_id = msg['video_note']['file_id']; kind = 'video'
+            state['messages'].append(self.record(msg, user, msg.get('caption', ''), kind, file_id=file_id))
         elif text:
             state['messages'].append(self.record(msg, user, text, 'text'))
         self.store.save(state)
@@ -359,6 +365,15 @@ class Bot:
                         m['text'] = transcribe_voice(self.api, src['file_id'])
                         m['media_only'] = not m['text']
                         m['media_note'] = 'provider transcript'
+                if os.getenv('GANG_IMG_READER_API_KEY') and os.getenv('GANG_IMG_READER_MODEL'):
+                    for m in parsed['messages']:
+                        if m['_kind'] == 'photo' and not m['text'].strip():
+                            src = by_tg[m['_tg']]
+                            if not src.get('file_id'):
+                                continue
+                            m['text'] = describe_image(self.api.download(src['file_id']))
+                            m['media_only'] = not m['text']
+                            m['media_note'] = 'provider image description'
             plan = prepare(parsed, consent, date, self.memory(state), cloud)
             plan['style'] = style.key
             plan['art_mode'] = art_mode
@@ -373,6 +388,8 @@ class Bot:
         self.store.save(state)
         art = 'AI image' if art_mode == 'image' else 'local drawing'
         lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking, {style.name} style, {art}). * = proposed."]
+        if plan.get('title') and plan['title'] != 'The Gang Edition':
+            lines.append(f"Title: {plan['title']}")
         for i, c in enumerate(plan['candidates'][:12], 1):
             lines.append(f"{'*' if c['message_id'] in plan['selected_ids'] else ' '} {i}. {c['author']}: {c['quote'][:110]}")
         lines.append(f'\nAdmin: /approve to use the starred moments, or /approve 2 4 5 (1-{MAX_MOMENTS} numbers, up to {PANELS_PER_PAGE} per page). Everyone can /revoke before then.')
@@ -450,7 +467,7 @@ class Bot:
         if not pngs:
             pngs = [out / 'comic.png']
         for idx, p in enumerate(pngs, 1):
-            caption = 'The Gang Edition. Draft approved by an admin.'
+            caption = f'{plan.get("title", "The Gang Edition")} — approved by an admin.'
             if len(pngs) > 1:
                 caption += f' ({idx}/{len(pngs)})'
             self.api.send_photo(state['chat_id'], p, caption)

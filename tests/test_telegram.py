@@ -143,4 +143,17 @@ class T(unittest.TestCase):
         self.assertIn('Draft for the week',self.api.texts()[-1])
         self.say(1,'/comic')
         self.assertIn('No eligible moments',self.api.texts()[-1])
+    def test_photo_described_in_cloud_mode(self):
+        self.optin(1,2);self.say(1,'/cloudok');self.say(2,'/cloudok')
+        self.say(1,'',photo=[{'file_id':'p1'}]);self.say(2,'Dinner was great haha')
+        with patch.dict(os.environ,{'GANG_LLM_API_KEY':'k','GANG_IMG_READER_API_KEY':'k','GANG_IMG_READER_MODEL':'vision-1'}), \
+             patch('gang_edition.telegram.prepare',return_value={'week':'2026-10-05','mode':'cloud','style':'marvel','candidates':[],'selected_ids':[],'title':'T','summary':'s'}) as prep, \
+             patch('gang_edition.telegram.describe_image',return_value='A group selfie at dinner.') as di, \
+             patch.object(self.api,'download',return_value=b'fakeimg'):
+            self.say(1,'/comic cloud')
+        self.assertIn('Draft for the week',self.api.texts()[-1])
+        di.assert_called_once()
+        parsed=prep.call_args.args[0]
+        photo=next(m for m in parsed['messages'] if m.get('media_note')=='provider image description')
+        self.assertEqual(photo['text'],'A group selfie at dinner.')
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,6 @@
 import html
 import json
+import re
 import secrets
 import threading
 import webbrowser
@@ -17,7 +18,7 @@ HTML='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewpor
 <details><summary>Consent format and privacy</summary><p>Every roster member needs local_processing=true, comic_portrayal=true and a dated evidence note. A denied or revoked member blocks the whole run. Check the full roster in WhatsApp, including people who never spoke. This prototype does not authenticate consent or infer membership changes.</p><p>UI supports text exports only. Image descriptions and voice transcripts are supported by the CLI with local sidecars. Never publish automatically.</p></details>
 <details><summary>Or load a group collected by the Telegram bot</summary><label>Group <select id="tgchat"></select></label> <button id="tgload">Use this Telegram group</button></details>
 <button id="sample">Load synthetic sample</button> <button id="prepare">Pick the moments</button></section>
-<section id="review" hidden><h2>2. Review the moments</h2><p>Select up to six. Read the quotes and remove anything sensitive. The safety filter is limited and English-focused.</p><div id="moments"></div><label><input id="approve" type="checkbox"> I reviewed these moments and approve a local draft comic.</label><button id="render">Create the comic</button></section>
+<section id="review" hidden><h2>2. Review the moments</h2><p>Select up to twelve. Read the quotes and remove anything sensitive. The safety filter is limited and English-focused.</p><div id="moments"></div><label><input id="approve" type="checkbox"> I reviewed these moments and approve a local draft comic.</label><button id="render">Create the comic</button></section>
 <section id="result" hidden><h2>3. Your edition</h2><p>Saved locally. This page never sends it to your group.</p><a id="png">Download PNG</a> · <a id="pdf">Download PDF</a><p><img id="comic" alt="Your reviewed illustrated weekly recap"></p></section><p id="status" role="status"></p><small>Persistent characters and used-moment memory live in web-workspace. Stop with Ctrl+C. Delete the folder when finished with private data.</small></main>
 <script>
 const $=id=>document.getElementById(id);let session;const token='TOKEN_PLACEHOLDER';
@@ -54,7 +55,7 @@ def run(port=8765):
                 self.reply(200,{'chat':(ROOT/'sample/chat.txt').read_text(),'consent':load(ROOT/'sample/consent.json')})
             elif self.path.startswith('/output/'):
                 bits=self.path.split('/')
-                if len(bits)!=4 or bits[2] not in sessions or bits[3] not in ('comic.png','comic.pdf'):
+                if len(bits)!=4 or bits[2] not in sessions or (bits[3] not in ('comic.png','comic.pdf') and not re.fullmatch(r'comic-\d+\.png', bits[3])):
                     self.reply(404,{'error':'Not found'});return
                 state=sessions[bits[2]]
                 # Recheck persisted consent before serving a saved output.
@@ -94,7 +95,8 @@ def run(port=8765):
                     consent=load(workspace/'consent.json')
                     out=finish(state['parsed'],consent,plan,workspace,workspace)
                     state['out']=out
-                    self.reply(200,{'png':f"/output/{data['session']}/comic.png",'pdf':f"/output/{data['session']}/comic.pdf"})
+                    png='comic.png' if (out/'comic.png').exists() else sorted(out.glob('comic-*.png'))[0].name
+                    self.reply(200,{'png':f"/output/{data['session']}/{png}",'pdf':f"/output/{data['session']}/comic.pdf"})
                 else:self.reply(404,{'error':'Not found'})
             except (ValueError,KeyError,TypeError,OSError) as e:
                 self.reply(400,{'error':str(e)})

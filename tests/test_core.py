@@ -96,13 +96,43 @@ class TestGang(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch('gang_edition.core.urllib.request.build_opener') as network:
             plan=prepare(self.parsed,self.consent,'2026-10-05',{});plan['approved']=True
             out=finish(self.parsed,self.consent,plan,folder,ROOT/'sample')
-            self.assertTrue((out/'comic.png').exists());self.assertTrue((out/'comic.pdf').exists())
+            self.assertTrue((out/'comic.pdf').exists());self.assertTrue(any(out.glob('comic*.png')))
             self.assertTrue((out/'sources.json').exists());network.assert_not_called()
             pool=candidates(self.parsed,'2026-10-05',load(Path(folder)/'memory.json'))
             self.assertFalse(set(plan['selected_ids']) & {m['message_id'] for m in pool})
     def test_invalid_selected_ids(self):
         plan=prepare(self.parsed,self.consent,'2026-10-05',{});plan['approved']=True;plan['selected_ids']=['made-up']
         with self.assertRaises(GateError):validate_plan(self.parsed,self.consent,plan)
+    def test_prepare_offline_default_title(self):
+        plan=prepare(self.parsed,self.consent,'2026-10-05',{})
+        self.assertEqual(plan['title'],'The Gang Edition')
+        self.assertEqual(plan['summary'],'A week worth keeping')
+        self.assertEqual(plan['title_source_ids'],[])
+    def test_prepare_cloud_generates_title(self):
+        consent=copy.deepcopy(self.consent)
+        for m in consent['members'].values():m['cloud_processing']=True
+        with patch('gang_edition.core.cloud_select',return_value=['m0001']), \
+             patch('gang_edition.core.summarize',return_value={'title':'Week of Pizza','summary':'They ate pizza.'}) as sm, \
+             patch.dict(os.environ,{'GANG_LLM_API_KEY':'k'}):
+            plan=prepare(self.parsed,consent,'2026-10-05',{},cloud=True)
+            self.assertEqual(plan['title'],'Week of Pizza')
+            self.assertEqual(plan['summary'],'They ate pizza.')
+            self.assertEqual(plan['title_source_ids'],['m0001'])
+            sm.assert_called_once()
+    def test_finish_regenerates_title_on_selection_change(self):
+        consent=copy.deepcopy(self.consent)
+        for m in consent['members'].values():m['cloud_processing']=True
+        plan=prepare(self.parsed,consent,'2026-10-05',{})
+        plan['mode']='cloud';plan['approved']=True
+        plan['selected_ids']=[plan['candidates'][0]['message_id']]
+        plan['title']='The Gang Edition';plan['title_source_ids']=[plan['candidates'][1]['message_id']]
+        with tempfile.TemporaryDirectory() as d, \
+             patch('gang_edition.core.summarize',return_value={'title':'Changed','summary':'New summary.'}) as sm:
+            out=finish(self.parsed,consent,plan,d,ROOT/'sample')
+            self.assertEqual(plan['title'],'Changed')
+            self.assertEqual(plan['summary'],'New summary.')
+            sm.assert_called_once()
+            self.assertTrue((out/'comic.png').exists())
 
 if __name__=='__main__':unittest.main()
 
@@ -127,6 +157,50 @@ class TestAdapter(unittest.TestCase):
         with patch.dict(os.environ,{'GANG_LLM_API_KEY':'synthetic-test-key','GANG_LLM_BASE_URL':'https://example.invalid/v1'}),patch('gang_edition.core.urllib.request.build_opener') as opener:
             opener.return_value.open.return_value=io.BytesIO(json.dumps(reply).encode())
             with self.assertRaises(ValueError):cloud_select([{'message_id':'m0001'}])
+    def test_cloud_select_up_to_twelve(self):
+        import io
+        pool=[{'message_id':f'm{i:04}','author':'A','quote':'q'} for i in range(12)]
+        reply={'choices':[{'message':{'content':json.dumps({'ids':[m['message_id'] for m in pool]})}}]}
+        with patch.dict(os.environ,{'GANG_LLM_API_KEY':'k','GANG_LLM_BASE_URL':'https://example.invalid/v1','GANG_LLM_MODEL':'m'}),patch('gang_edition.core.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value=io.BytesIO(json.dumps(reply).encode())
+            self.assertEqual(len(cloud_select(pool)),12)
+
+
+class TestSummarize(unittest.TestCase):
+    def test_summarize_mocked(self):
+        import io
+        msgs=[{'author':'A','text':'pizza'},{'author':'B','text':'won'}]
+        reply={'choices':[{'message':{'content':'{"title":"Pizza Victory","summary":"They found pizza and won."}'}}]}
+        with patch.dict(os.environ,{'GANG_LLM_API_KEY':'k','GANG_LLM_BASE_URL':'https://example.invalid/v1','GANG_LLM_MODEL':'m'}),patch('gang_edition.core.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value=io.BytesIO(json.dumps(reply).encode())
+            out=summarize(msgs)
+            self.assertEqual(out['title'],'Pizza Victory')
+            self.assertEqual(out['summary'],'They found pizza and won.')
+            self.assertEqual(json.loads(opener.return_value.open.call_args.args[0].data)['model'],'m')
+    def test_summarize_offline_fallback(self):
+        with patch.dict(os.environ,{},clear=True):
+            self.assertEqual(summarize([{'author':'A','text':'x'}])['title'],'The Gang Edition')
+
+
+class TestDescribeImage(unittest.TestCase):
+    def test_describe_image_mocked(self):
+        import io
+        reply={'choices':[{'message':{'content':'Two friends at a table.'}}]}
+        with patch.dict(os.environ,{'GANG_IMG_READER_API_KEY':'k','GANG_IMG_READER_BASE_URL':'https://example.invalid/v1','GANG_IMG_READER_MODEL':'vision-1'}),patch('gang_edition.core.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value=io.BytesIO(json.dumps(reply).encode())
+            self.assertEqual(describe_image(b'fakebytes'),'Two friends at a table.')
+            req=opener.return_value.open.call_args.args[0]
+            self.assertEqual(req.full_url,'https://example.invalid/v1/chat/completions')
+            payload=json.loads(req.data)
+            self.assertEqual(payload['model'],'vision-1')
+            content=payload['messages'][0]['content']
+            self.assertIn('data:image/jpeg;base64,',content[1]['image_url']['url'])
+    def test_describe_image_needs_key(self):
+        with patch.dict(os.environ,{},clear=True):
+            with self.assertRaises(GateError):describe_image(b'x')
+    def test_describe_image_needs_model(self):
+        with patch.dict(os.environ,{'GANG_IMG_READER_API_KEY':'k'},clear=True):
+            with self.assertRaises(GateError):describe_image(b'x')
 
 
 class TestStyles(unittest.TestCase):
@@ -177,3 +251,36 @@ class TestImage(unittest.TestCase):
             opener.return_value.open.return_value = io.BytesIO(json.dumps({'data': []}).encode())
             with self.assertRaises(ValueError):
                 generate_image('x')
+    def test_generate_image_passes_refs_and_seed(self):
+        import io, base64
+        from gang_edition.img import generate_image
+        png = b'\x89PNG-fake'
+        reply = {'data': [{'b64_json': base64.b64encode(png).decode()}]}
+        with patch.dict(os.environ, {'GANG_IMG_API_KEY': 'k', 'GANG_IMG_BASE_URL': 'https://example.invalid/api/v1', 'GANG_IMG_MODEL': 'm'}), \
+                patch('gang_edition.img.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value = io.BytesIO(json.dumps(reply).encode())
+            generate_image('hello', refs=['data:image/png;base64,AAAA'], seed=42)
+            payload = json.loads(opener.return_value.open.call_args.args[0].data)
+            self.assertEqual(payload['input_references'][0]['image_url']['url'], 'data:image/png;base64,AAAA')
+            self.assertEqual(payload['seed'], 42)
+    def test_build_page_prompt_numbers_all_characters(self):
+        from gang_edition.img import build_page_prompt
+        from gang_edition.styles import resolve_style
+        sheet = character_sheet({'A': {}, 'B': {}, 'C': {}, 'D': {}}, {})
+        chosen = [{'author': a, 'text': f'{a} says hi'} for a in ('A', 'B', 'C', 'D')]
+        prompt = build_page_prompt(chosen, sheet, resolve_style('cartoon'), ['A', 'B', 'C', 'D'])
+        self.assertIn('Character 4 (D)', prompt)
+        self.assertIn('4 total', prompt)
+        self.assertIn('Panel 3: Character 3 ("C") says', prompt)
+        self.assertIn('Do not merge, drop, duplicate, or swap', prompt)
+    def test_reference_data_urls_and_card(self):
+        from gang_edition.img import _reference_data_urls
+        from gang_edition.render import character_card
+        from PIL import Image
+        sheet = character_sheet({'A': {}, 'B': {}}, {})
+        card = character_card(sheet['A'])
+        self.assertIsInstance(card, Image.Image)
+        self.assertEqual(card.size, (384, 384))
+        refs = _reference_data_urls(sheet, ['A', 'B'])
+        self.assertEqual(len(refs), 2)
+        self.assertTrue(all(r.startswith('data:image/png;base64,') for r in refs))
