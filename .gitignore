@@ -7,4 +7,4 @@ workspace/
 web-workspace/
 demo-workspace/
 *.pyc
-token-optimizer/
+/token-optimizer/

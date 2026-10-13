@@ -95,4 +95,26 @@ class T(unittest.TestCase):
     def test_token_validation_and_redaction(self):
         with self.assertRaises(TelegramError):TelegramAPI('')
         self.assertEqual(redact('x 123:abc y','123:abc'),'x <token> y')
+    def test_styles_list_and_admin_set(self):
+        self.optin(1,2)
+        self.say(1,'/styles');self.assertIn('marvel',self.api.texts()[-1])
+        self.say(2,'/style ghibli');self.assertIn('Only group admins',self.api.texts()[-1])
+        self.say(1,'/style ghibli');self.assertEqual(self.st()['style'],'ghibli')
+        self.say(1,'/style bogus');self.assertIn('Unknown style',self.api.texts()[-1])
+        self.assertEqual(self.st()['style'],'ghibli')
+    def test_comic_style_arg(self):
+        self.optin(1,2);self.say(1,'Plot twist! wrong restaurant!!');self.say(2,'Finally won the quiz haha!')
+        self.say(1,'/comic 2026-10-05 ghibli')
+        self.assertIn('Ghibli style',self.api.texts()[-1])
+        self.assertEqual(self.st()['pending']['plan']['style'],'ghibli')
+        self.assertEqual(self.st()['pending']['plan']['art_mode'],'procedural')
+    def test_rename_member(self):
+        self.optin(1,2);self.say(1,'hello');self.say(2,'world')
+        self.say(2,'/rename U1 Dan');self.assertIn('Only group admins',self.api.texts()[-1])
+        self.say(1,'/rename U1 Dan')
+        self.assertEqual(self.st()['members']['1']['label'],'Dan')
+        parsed,consent=build_inputs(self.st())
+        self.assertEqual(consent['members']['U1']['label'],'Dan')
+        from gang_edition.core import character_sheet
+        self.assertEqual(character_sheet(consent['members'],{})['U1']['label'],'Dan')
 if __name__=='__main__':unittest.main()

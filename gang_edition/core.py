@@ -197,12 +197,45 @@ def validate_plan(parsed, consent, plan):
         raise GateError('A selected moment is ineligible or outside the week.')
     return chosen
 
-COLORS = ['#73a89a', '#d89168', '#a59bc4', '#76a4c4', '#cf9ca8', '#b6b56d']
+COLORS = ['#73a89a', '#d89168', '#a59bc4', '#76a4c4', '#cf9ca8', '#b6b56d',
+          '#e0735f', '#5f8d73', '#8d5f8d', '#c4a76b', '#6b9ec4', '#a86b8d']
+COLOR_NAMES = ['teal', 'terracotta', 'lavender', 'steel blue', 'rose', 'olive',
+               'coral', 'forest green', 'plum', 'sand', 'sky blue', 'magenta']
+SKIN = '#eccab0'
+HAIR_COUNT = 4
+
+def _appearance_key(app):
+    return (app.get('color'), app.get('hair'), app.get('glasses'), app.get('skin') or SKIN)
 
 def character_sheet(members, existing):
-    result = dict(existing)
-    for name in sorted(members):
-        if name not in result:
-            number = int(hashlib.sha256(name.encode()).hexdigest()[:8], 16)
-            result[name] = {'color': COLORS[number % len(COLORS)], 'hair': number % 4, 'glasses': bool(number % 2), 'label': name}
+    # Deterministic, stable, and guaranteed-distinct appearances: every member is
+    # resolved from the sorted roster into a non-colliding (color, skin, hair,
+    # glasses) combination. Existing looks are kept unless they collide.
+    grants = members if isinstance(members, dict) else {name: {} for name in members}
+    existing = dict(existing)
+    assigned = {}
+    counter = [0]
+
+    def fresh_look():
+        while True:
+            i = counter[0]
+            counter[0] += 1
+            color = COLORS[i % len(COLORS)]
+            hair = i % HAIR_COUNT
+            glasses = (i // HAIR_COUNT) % 2
+            key = (color, hair, glasses, SKIN)
+            if key not in assigned:
+                assigned[key] = True
+                return {'color': color, 'skin': SKIN, 'hair': hair, 'glasses': glasses}
+
+    result = {}
+    for name in sorted(grants):
+        label = grants[name].get('label', name) if isinstance(grants[name], dict) else name
+        prior = existing.get(name)
+        if prior is not None and _appearance_key(prior) not in assigned:
+            assigned[_appearance_key(prior)] = True
+            result[name] = dict(prior)
+        else:
+            result[name] = fresh_look()
+        result[name]['label'] = label
     return result

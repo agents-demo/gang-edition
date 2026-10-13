@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 from .core import GateError, load, save, prepare, check_consent, digest
+from .styles import STYLES, DEFAULT_STYLE, effective_style
 
 HELP = (
     "The Gang Edition: a weekly comic page from this group's best moments.\n\n"
@@ -30,7 +31,9 @@ HELP = (
     "/status - what the bot has stored\n"
     "/transcript <text> - reply to your own voice message with its transcript\n"
     "/describe <text> - reply to your own photo with a description\n"
-    "Admins: /comic [YYYY-MM-DD] [cloud] picks moments for review, /approve [numbers] draws and posts the page."
+    "/styles - list available comic styles\n"
+    "Admins: /comic [YYYY-MM-DD] [cloud] [style] picks moments for review, /approve [numbers] draws and posts, "
+    "/style <name> sets the default style, /rename <name> <label> gives a member a display name."
 )
 
 PRIVACY_WARNING = (
@@ -176,8 +179,11 @@ def build_inputs(state):
         raise GateError('At least two members must opt in with /consent first.')
     consent = {'roster_confirmed_complete': True, 'roster_basis': 'Telegram opt-in: only members who sent /consent are included.', 'members': {}}
     for uid, m in members.items():
-        consent['members'][names[uid]] = {'local_processing': True, 'comic_portrayal': True, 'cloud_processing': bool(m.get('cloud_processing')),
-                                          'evidence': f"Telegram /consent by user id {uid} at {m['granted_at']}"}
+        entry = {'local_processing': True, 'comic_portrayal': True, 'cloud_processing': bool(m.get('cloud_processing')),
+                 'evidence': f"Telegram /consent by user id {uid} at {m['granted_at']}"}
+        if m.get('label'):
+            entry['label'] = m['label']
+        consent['members'][names[uid]] = entry
     msgs = []
     for m in sorted((x for x in state['messages'] if str(x['user_id']) in members), key=lambda x: (x['timestamp'], x['tg_id'])):
         msgs.append({'id': f'm{len(msgs)+1:04}', 'timestamp': m['timestamp'], 'author': names[str(m['user_id'])], 'text': m['text'],
@@ -303,6 +309,13 @@ class Bot:
         if cmd == 'roster':
             names = unique_names(state['members'])
             return reply('Opted in: ' + (', '.join(sorted(names.values())) or 'nobody yet') + '\nEveryone else is excluded.')
+        if cmd == 'styles':
+            cur = state.get('style') or os.getenv('GANG_DEFAULT_STYLE') or DEFAULT_STYLE
+            return reply('Available styles: ' + ', '.join(sorted(STYLES)) + '.\nDefault: ' + cur + '. Admins set it with /style <name>.')
+        if cmd in ('style', 'rename'):
+            if not self.api.is_admin(chat['id'], user['id']):
+                return reply('Only group admins can run /style and /rename.')
+            return self.style(state, arg, reply) if cmd == 'style' else self.rename(state, arg, reply)
         if cmd == 'status':
             mine = sum(1 for m in state['messages'] if str(m['user_id']) == uid)
             out = f"Opted-in members: {len(state['members'])}. Stored messages: {len(state['messages'])} (yours: {mine}). Retention: {self.store.retention_days} days."
@@ -326,8 +339,15 @@ class Bot:
     def comic(self, state, msg, arg, reply):
         from .core import week_start
         words = arg.split()
-        cloud = 'cloud' in [w.lower() for w in words]
+        lower = [w.lower() for w in words]
+        cloud = 'cloud' in lower
+        style_key = next((w for w in lower if w in STYLES), None)
+        try:
+            style = effective_style(style_key, state.get('style'))
+        except ValueError as e:
+            return reply(f'Blocked: {e}')
         date = next((w for w in words if re.fullmatch(r'\d{4}-\d{2}-\d{2}', w)), iso(msg['date'])[:10])
+        art_mode = 'image' if (cloud and os.getenv('GANG_IMG_API_KEY')) else 'procedural'
         try:
             parsed, consent = build_inputs(state)
             if cloud:
@@ -340,15 +360,48 @@ class Bot:
                         m['media_only'] = not m['text']
                         m['media_note'] = 'provider transcript'
             plan = prepare(parsed, consent, date, self.memory(state), cloud)
+            plan['style'] = style.key
+            plan['art_mode'] = art_mode
+            plan['img_mode'] = os.getenv('GANG_IMG_MODE', 'full')
         except (GateError, ValueError, OSError, urllib.error.URLError, KeyError) as e:
             return reply(f'Blocked: {e}')
         state['pending'] = {'parsed': parsed, 'consent': consent, 'plan': plan}
         self.store.save(state)
-        lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking). * = proposed."]
+        art = 'AI image' if art_mode == 'image' else 'local drawing'
+        lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking, {style.name} style, {art}). * = proposed."]
         for i, c in enumerate(plan['candidates'][:12], 1):
             lines.append(f"{'*' if c['message_id'] in plan['selected_ids'] else ' '} {i}. {c['author']}: {c['quote'][:110]}")
         lines.append('\nAdmin: /approve to use the starred moments, or /approve 2 4 5 (1-6 numbers). Everyone can /revoke before then.')
         reply('\n'.join(lines))
+
+    def style(self, state, arg, reply):
+        if not arg:
+            cur = state.get('style') or os.getenv('GANG_DEFAULT_STYLE') or DEFAULT_STYLE
+            return reply(f'Current comic style: {cur}. Set with /style <name>. Available: ' + ', '.join(sorted(STYLES)) + '.')
+        key = arg.strip().split()[0].lower()
+        if key not in STYLES:
+            return reply(f'Unknown style "{key}". Choose from: ' + ', '.join(sorted(STYLES)) + '.')
+        state['style'] = key
+        state['pending'] = None
+        self.store.save(state)
+        return reply(f'Comic style set to {key}. The next /comic will use it unless a style is passed.')
+
+    def rename(self, state, arg, reply):
+        tokens = arg.strip().split()
+        if len(tokens) < 2:
+            return reply('Usage: /rename <member-name> <new-label>. The label is one word.')
+        label = tokens[-1]
+        name = ' '.join(tokens[:-1])
+        matches = [uid for uid, m in state['members'].items() if m.get('name', '').lower() == name.lower() or uid == name]
+        if not matches:
+            return reply(f'No opted-in member named "{name}". Use /roster to see names.')
+        if len(matches) > 1:
+            return reply(f'Multiple members are named "{name}". Rename by Telegram id instead: /rename <id> <label>.')
+        uid = matches[0]
+        state['members'][uid]['label'] = label
+        state['pending'] = None
+        self.store.save(state)
+        return reply(f'{state["members"][uid].get("name", name)} will be shown as "{label}" in future comics.')
 
     def memory(self, state):
         p = self.store.dir(state['chat_id']) / 'memory.json'

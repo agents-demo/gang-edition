@@ -55,6 +55,16 @@ class TestGang(unittest.TestCase):
         a=character_sheet(self.consent['members'],{})
         b=character_sheet(['Extra','Alex'],a)
         self.assertEqual(a['Alex'],b['Alex'])
+    def test_character_distinct(self):
+        sheet=character_sheet({'Alex':{},'Maya':{},'Sam':{},'Jo':{},'Lee':{},'Kim':{}},{})
+        keys=[(v['color'],v['hair'],v['glasses']) for v in sheet.values()]
+        self.assertEqual(len(keys),len(set(keys)))
+    def test_character_collision_resolved(self):
+        existing={'A':{'color':'#73a89a','hair':0,'glasses':False,'label':'A'},
+                  'B':{'color':'#73a89a','hair':0,'glasses':False,'label':'B'}}
+        sheet=character_sheet(['A','B'],existing)
+        self.assertNotEqual((sheet['A']['color'],sheet['A']['hair'],sheet['A']['glasses']),
+                            (sheet['B']['color'],sheet['B']['hair'],sheet['B']['glasses']))
     def test_media_path(self):
         with self.assertRaises(ValueError):safe_media(ROOT/'sample','../.env')
     def test_media_enrichment(self):
@@ -94,3 +104,53 @@ class TestAdapter(unittest.TestCase):
         with patch.dict(os.environ,{'GANG_LLM_API_KEY':'synthetic-test-key','GANG_LLM_BASE_URL':'https://example.invalid/v1'}),patch('gang_edition.core.urllib.request.build_opener') as opener:
             opener.return_value.open.return_value=io.BytesIO(json.dumps(reply).encode())
             with self.assertRaises(ValueError):cloud_select([{'message_id':'m0001'}])
+
+
+class TestStyles(unittest.TestCase):
+    def test_resolve_known(self):
+        from gang_edition.styles import resolve_style,STYLES
+        self.assertEqual(resolve_style('marvel').key,'marvel')
+        self.assertIn('ghibli',STYLES)
+        self.assertIn('dc',STYLES)
+    def test_resolve_unknown(self):
+        from gang_edition.styles import resolve_style
+        with self.assertRaises(ValueError):resolve_style('anime')
+    def test_default_is_marvel(self):
+        from gang_edition.styles import effective_style
+        with patch.dict(os.environ,{},clear=True):
+            self.assertEqual(effective_style().key,'marvel')
+    def test_env_default_override(self):
+        from gang_edition.styles import effective_style
+        with patch.dict(os.environ,{'GANG_DEFAULT_STYLE':'ghibli'}):
+            self.assertEqual(effective_style().key,'ghibli')
+
+
+class TestImage(unittest.TestCase):
+    def test_generate_image_mocked(self):
+        import io, base64
+        from gang_edition.img import generate_image
+        png = b'\x89PNG-fake'
+        reply = {'data': [{'b64_json': base64.b64encode(png).decode(), 'media_type': 'image/png'}]}
+        with patch.dict(os.environ, {'GANG_IMG_API_KEY': 'k', 'GANG_IMG_BASE_URL': 'https://example.invalid/api/v1', 'GANG_IMG_MODEL': 'm'}), \
+                patch('gang_edition.img.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value = io.BytesIO(json.dumps(reply).encode())
+            self.assertEqual(generate_image('hello'), png)
+            req = opener.return_value.open.call_args.args[0]
+            self.assertEqual(req.full_url, 'https://example.invalid/api/v1/images')
+            payload = json.loads(req.data)
+            self.assertEqual(payload['model'], 'm')
+            self.assertEqual(payload['prompt'], 'hello')
+            self.assertEqual(req.get_header('Authorization'), 'Bearer k')
+    def test_generate_image_needs_key(self):
+        from gang_edition.img import generate_image
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(GateError):
+                generate_image('x')
+    def test_generate_image_no_data_rejected(self):
+        import io
+        from gang_edition.img import generate_image
+        with patch.dict(os.environ, {'GANG_IMG_API_KEY': 'k', 'GANG_IMG_BASE_URL': 'https://example.invalid/api/v1'}), \
+                patch('gang_edition.img.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value = io.BytesIO(json.dumps({'data': []}).encode())
+            with self.assertRaises(ValueError):
+                generate_image('x')

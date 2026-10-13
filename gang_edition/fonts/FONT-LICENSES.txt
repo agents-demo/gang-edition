@@ -1,0 +1,6 @@
+Bundled fonts and their licenses:
+
+- DejaVu Sans / DejaVu Sans Bold - see LICENSE.txt (Bitstream Vera license)
+- Bangers (Bangers-Regular.ttf) - SIL Open Font License 1.1, see OFL.txt
+- Comic Neue (ComicNeue-Regular.ttf, ComicNeue-Bold.ttf) - SIL Open Font License 1.1, see OFL.txt
+- Bebas Neue (BebasNeue-Regular.ttf) - SIL Open Font License 1.1, see OFL.txt

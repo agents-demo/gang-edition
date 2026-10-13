@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from .core import load,save,parse_export,enrich,prepare,validate_plan,character_sheet,fingerprint,check_consent
 from .render import render_page
+from .styles import effective_style
 
 ROOT=Path(__file__).resolve().parent.parent
 
@@ -19,7 +20,12 @@ def finish(parsed,consent,plan,workspace,media_dir):
     workspace=Path(workspace)
     sheet=character_sheet(consent['members'],load(workspace/'characters.json') if (workspace/'characters.json').exists() else {})
     out=workspace/'editions'/plan['week']
-    render_page(chosen,sheet,plan['week'],out,media_dir)
+    style=effective_style(plan.get('style'))
+    if plan.get('art_mode')=='image':
+        from .img import render_image_page
+        render_image_page(chosen,sheet,plan,style,out)
+    else:
+        render_page(chosen,sheet,plan['week'],out,media_dir,style)
     save(out/'sources.json',chosen)
     save(out/'reviewed-plan.json',plan)
     (out/'transcript.txt').write_text('\n\n'.join(f"{m['timestamp']} | {m['author']}\n{m['text']}" for m in chosen),encoding='utf-8')
@@ -38,7 +44,9 @@ def load_env():
             line=raw.strip()
             if not line or line.startswith('#') or '=' not in line: continue
             key,value=line.split('=',1)
-            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL','TELEGRAM_BOT_TOKEN','GANG_TRANSCRIBE_MODEL','GANG_RETENTION_DAYS'):
+            if key.strip() in ('GANG_LLM_API_KEY','GANG_LLM_BASE_URL','GANG_LLM_MODEL','TELEGRAM_BOT_TOKEN','GANG_TRANSCRIBE_MODEL','GANG_RETENTION_DAYS',
+                               'GANG_IMG_API_KEY','GANG_IMG_BASE_URL','GANG_IMG_MODEL','GANG_IMG_MODE','GANG_IMG_RESOLUTION','GANG_IMG_ASPECT_RATIO',
+                               'GANG_DEFAULT_STYLE'):
                 os.environ.setdefault(key.strip(),value.strip().strip("'\""))
 
 def main():
