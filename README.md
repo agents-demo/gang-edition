@@ -48,11 +48,15 @@ You need [uv](https://docs.astral.sh/uv/) and Python 3.10 or newer. The first in
    status - show storage status
    transcript - add text to your own voice message
    describe - add a description to your own photo
+   setavatar - use your own photo as your character's likeness
+   clearavatar - remove your likeness avatar
    styles - list available comic styles
-   comic - (admin) draft this week's comic
+   comic - (admin) draft this week's comic (cloud default; 'offline' for local)
    approve - (admin) draw and post the comic
+   autopost - (admin) turn on/off posting without the review step
    style - (admin) set the default comic style
    rename - (admin) give a member a display name
+   wrapped - (admin) make a stats and awards recap
    ```
 
 ### Step 3: Put settings in `.env`
@@ -96,8 +100,8 @@ GANG_IMG_MODE=full
 GANG_IMG_RESOLUTION=2K
 GANG_IMG_ASPECT_RATIO=2:3
 
-# Optional image reading (vision) to describe group photos. Used only at
-# /comic cloud time for opted-in + /cloudok members. Leave empty to skip.
+# Optional image reading (vision) to describe group photos. Used only in
+# cloud mode for opted-in + /cloudok members. Leave empty to skip.
 GANG_IMG_READER_API_KEY=
 GANG_IMG_READER_BASE_URL=
 GANG_IMG_READER_MODEL=
@@ -139,12 +143,39 @@ The `/consent` action applies to the Telegram account that sent it; it does not 
 
 An administrator of the Telegram group runs the selection and posting commands. The bot checks Telegram's group-admin status before allowing either command.
 
-1. An admin sends **`/comic`** to prepare the current week, or **`/comic 2026-10-05`** to choose the Monday-through-Sunday week containing that date. Use an ISO date (`YYYY-MM-DD`). Add the word `cloud` only when everyone opted in to cloud processing and you intend to use the configured provider: `/comic cloud` or `/comic 2026-10-05 cloud`. Add a style name to pick the look, e.g. `/comic cloud marvel`. If a style is not given, the group default (or `GANG_DEFAULT_STYLE`, then `marvel`) is used. An admin sets the group default with `/style ghibli` and lists styles with `/styles`.
+1. An admin sends **`/comic`** to prepare the current week, or **`/comic 2026-10-05`** to choose the Monday-through-Sunday week containing that date. Use an ISO date (`YYYY-MM-DD`). Cloud processing is the default: when `GANG_LLM_API_KEY` is set and every opted-in member has sent `/cloudok`, the bot uses the configured provider for moment selection, title/summary, voice transcription, and image reading. Add the word `offline` to force local selection instead (`/comic offline` or `/comic 2026-10-05 offline`); the word `cloud` is also accepted for explicitness. Add a style name to pick the look, e.g. `/comic marvel`. If a style is not given, the group default (or `GANG_DEFAULT_STYLE`, then `marvel`) is used. An admin sets the group default with `/style ghibli` and lists styles with `/styles`.
 2. The bot replies with candidate moments. A `*` marks a proposed selection. In cloud mode it also proposes a comic title and a one-line summary, regenerated if an admin changes the selection at approval time. Read the quotes in the group and remove anything private, sensitive, misleading, or unsuitable for the intended audience. Everyone may still use `/revoke` before approval.
 3. An admin sends **`/approve`** to draw the starred moments, or **`/approve 2 4 5`** to choose numbered moments from the list. The number choices are positions in the displayed list; select up to twelve moments. Up to six appear per page; more than six are split into additional pages, each posted as its own image, with one combined PDF. This is the step that posts the resulting images and PDF to the group. Nothing is posted as a comic before an admin approves it.
 4. Every moment proposed by `/comic` is remembered locally as soon as the draft is shown, whether or not an admin approves it. A later `/comic` starts from the next unused moments, so a proposal never repeats. Deduplication is not a substitute for human review; to reuse past moments, clear the group's `memory.json`.
 
+To skip the review step, an admin can enable **`/autopost on`** (turn it off with `/autopost off`). While auto-post is on, `/comic` uses the proposed selection and posts the comic right away instead of waiting for `/approve`. This removes the human review before posting, so only enable it for a group that is comfortable with that.
+
 For an offline workflow with the collected Telegram messages, see [Telegram CLI and local web UI](#telegram-cli-and-local-web-ui). The computer running the bot must stay on to collect messages; the 24-hour missed-updates window still applies even if an admin later uses the local UI.
+
+## Bot commands
+
+These are the commands the bot understands in a group. The BotFather `/setcommands` list (Step 2) is a short label for each; the full behavior is below.
+
+| Command | Who | What it does |
+|---|---|---|
+| `/start`, `/help` | anyone | Post the command list and a short introduction. |
+| `/consent` | any member | Opt in: store your text messages here and draw you in the comic. |
+| `/cloudok` | any member | Also allow your text/voice/photo to be sent to the configured AI provider (requires `/consent` first). |
+| `/cloudno` | any member | Withdraw the cloud permission granted with `/cloudok`. |
+| `/revoke` | any member | Opt out and delete everything stored about you (messages, avatar, consent). |
+| `/roster` | any member | List the members who opted in. |
+| `/status` | any member | Show what the bot has stored, retention, and whether auto-post is on. |
+| `/transcript <text>` | member | Reply to **your own** voice message to add its transcript. |
+| `/describe <text>` | member | Reply to **your own** photo to add a description. |
+| `/setavatar` | member | Reply to **your own** photo to use your likeness as your character (requires `/cloudok` and `GANG_IMG_API_KEY`). |
+| `/clearavatar` | member | Remove your likeness avatar. |
+| `/styles` | anyone | List the available comic styles. |
+| `/comic [YYYY-MM-DD] [style]` | admin | Draft this week's comic (cloud by default; add `offline` for local selection). |
+| `/approve [numbers]` | admin | Draw and post the starred moments, or the given numbered moments (e.g. `/approve 2 4 5`). |
+| `/autopost on\|off` | admin | Turn on/off posting the comic automatically without the review step. |
+| `/style <name>` | admin | Set the group's default comic style. |
+| `/rename <name> <label>` | admin | Give a member a display name. |
+| `/wrapped [year\|all]` | admin | Make a stats-and-awards recap (default: current year). |
 
 ## Voice messages and photos in Telegram
 
@@ -155,7 +186,17 @@ The bot does not download photos or video, and it does not transcribe voice by d
 
 The bot only accepts the source message from the same opted-in Telegram account, and the supplied text is marked as a transcript or image description. Check it for accuracy and avoid describing people who have not consented. The bot does not inspect the photo itself.
 
-There is also an optional cloud voice path. If every opted-in member sent `/cloudok`, an admin can deliberately run `/comic cloud`. The bot sends opted-in voice audio to the configured OpenAI-compatible `/audio/transcriptions` endpoint using `GANG_TRANSCRIBE_MODEL` (default `whisper-1`), and cloud selection may send filtered candidate text to the provider. Audio and chat content leave your computer; the provider may retain or charge for requests. Verify the provider, terms, and cost yourself before use. Cloud mode does not analyze photos or video. The cloud transcription path was implemented and tested with mocks only; no live provider or Telegram call was made in this build.
+There is also an optional cloud voice path. If every opted-in member sent `/cloudok`, an admin runs `/comic` (cloud is the default). The bot sends opted-in voice audio to the configured OpenAI-compatible `/audio/transcriptions` endpoint using `GANG_TRANSCRIBE_MODEL` (default `whisper-1`), and cloud selection may send filtered candidate text to the provider. Audio and chat content leave your computer; the provider may retain or charge for requests. Verify the provider, terms, and cost yourself before use. Cloud mode does not analyze photos or video. The cloud transcription path was implemented and tested with mocks only; no live provider or Telegram call was made in this build.
+
+## Gang Wrapped (stats and awards recap)
+
+The bot keeps a rolling aggregate ledger in `workspace/telegram/<chat id>/stats.json` as messages arrive (counts per member and per day, plus top emoji — never raw message text). Unlike `state.json`, this ledger is not pruned, so a recap can span the whole year or longer even though raw messages are dropped after `GANG_RETENTION_DAYS`.
+
+An admin runs **`/wrapped`** to render a "Gang Wrapped" page (stats boxes + fun awards like Most Active, Night Owl, The Essayist, Voice-Note MVP, Photo MVP) and post it with a list of awards. It defaults to the current calendar year; pass `all` for everything or a year such as `2026` (`/wrapped 2026`). There is also a CLI: `uv run gang-edition wrapped --chat-id -1001234567890 --period year`. Recaps only reflect data collected since the bot was installed — the ledger is forward-looking, not retroactive.
+
+## Likeness avatars (opt-in)
+
+Members can, with explicit consent, make their drawn character resemble them. Reply to **your own photo** with **`/setavatar`**. This requires `/consent`, `/cloudok`, and a configured image key (`GANG_IMG_API_KEY`): the photo is sent to the image provider once to produce a stylized cartoon portrait, which is cached locally and used as your character's reference in both the local renderer and image mode. **`/clearavatar`** removes it, and `/revoke` deletes the cached portrait and raw photo. The photo is stored only on your computer (`workspace/telegram/<chat id>/avatars/`); it leaves the machine only for the one stylization call, and only when you have granted `/cloudok`.
 
 ## Telegram CLI and local web UI
 
@@ -231,25 +272,26 @@ For the WhatsApp CLI, cloud selection requires a separate permission from every 
 uv run gang-edition prepare --chat chat.txt --consent consent.json --date-order DMY --week 2026-10-05 --plan plan.json --cloud
 ```
 
-For Telegram, each opted-in member uses `/cloudok`, and an admin explicitly runs `/comic cloud`. A configured key does not switch on cloud mode by itself. Cloud selection sends up to 30 filtered candidate quotes, sender names, timestamps, and scores to the configured endpoint; it does not send the full export or image bytes. In cloud mode the app also generates the comic title and a one-line summary from the selected quotes, and, when an image-reader triplet is configured, sends photos posted by `/cloudok` members to a vision model to obtain a text description (the photo bytes, not the whole chat). Telegram cloud voice transcription separately sends voice audio. Remote providers may retain content under their own policies and may charge for requests. Check provider and pricing before use. A local endpoint stays local only if that server does not relay traffic elsewhere.
+For Telegram, each opted-in member uses `/cloudok`, and an admin runs `/comic` (cloud is the default). A configured key does not switch on cloud mode by itself: cloud still requires `GANG_LLM_API_KEY` and every member's `/cloudok`; otherwise `/comic` falls back to offline selection and says so. Cloud selection sends up to 30 filtered candidate quotes, sender names, timestamps, and scores to the configured endpoint; it does not send the full export or image bytes. In cloud mode the app also generates the comic title and a one-line summary from the selected quotes, and, when an image-reader triplet is configured, sends photos posted by `/cloudok` members to a vision model to obtain a text description (the photo bytes, not the whole chat). Telegram cloud voice transcription separately sends voice audio. Remote providers may retain content under their own policies and may charge for requests. Check provider and pricing before use. A local endpoint stays local only if that server does not relay traffic elsewhere.
 
 **The chat key upgrades moment selection and title/summary generation only.** The API adapter is implemented and tested with mocked responses; no paid live API call was made. Offline mode is the reliable no-key demo. The web UI deliberately has no cloud toggle.
 
 ## Optional image generation (Seedream via OpenRouter)
 
-When `GANG_IMG_API_KEY` is set and every opted-in member has sent `/cloudok`, an admin's `/comic cloud` automatically uses the configured image model (default `bytedance-seed/seedream-5-0-pro`) to draw the page instead of the local renderer. The selected quotes, sender display names, style, and a generated prompt are sent to OpenRouter; the provider may retain or charge for requests. Verify the provider, terms, and cost yourself.
+When `GANG_IMG_API_KEY` is set and every opted-in member has sent `/cloudok`, an admin's `/comic` automatically uses the configured image model (default `bytedance-seed/seedream-5-0-pro`) to draw the page instead of the local renderer. The selected quotes, sender display names, style, and a generated prompt are sent to OpenRouter; the provider may retain or charge for requests. Verify the provider, terms, and cost yourself.
 
 - **`GANG_IMG_MODE=full`** (default): the model generates the whole page in the chosen style, including the quoted text inside speech bubbles. Text may be garbled or shortened; review the image carefully before posting.
 - **`GANG_IMG_MODE=hybrid`**: the model generates a background in the chosen style, and the local renderer overlays the panels, name tags, avatars, and exact quote text, so the words stay accurate.
 
 Every opted-in member is assigned a distinct stylized look (shirt color, hair, glasses). In image mode the app renders a small reference portrait for each character and sends it to the model as `input_references`, along with numbered character descriptions and a stable per-edition seed, so the same person keeps the same appearance across panels and pages. This keeps characters consistent and encourages the model to draw everyone who appears in the selected moments, but it is stylized and best-effort: the model may still merge or drop characters, so review the image before posting.
 
-To choose a style, pass it in the command (`/comic cloud marvel`) or set the group default with `/style ghibli`. Available styles: `marvel`, `dc`, `ghibli`, `cartoon`. `GANG_IMG_RESOLUTION` (`1K` or `2K`) and `GANG_IMG_ASPECT_RATIO` (for example `2:3`) control the generated image size. The image-generation path is implemented and tested with mocked responses only; no live OpenRouter call was made in this build.
+To choose a style, pass it in the command (`/comic marvel`) or set the group default with `/style ghibli`. Available styles: `marvel`, `dc`, `ghibli`, `cartoon`. `GANG_IMG_RESOLUTION` (`1K` or `2K`) and `GANG_IMG_ASPECT_RATIO` (for example `2:3`) control the generated image size. The image-generation path is implemented and tested with mocked responses only; no live OpenRouter call was made in this build.
 
 ## Characters, storage, and retention
 
 - Telegram bot state is stored under `workspace/telegram/<chat id>/`. Group messages, consent state, pending drafts, and deduplication memory are plain, unencrypted files. Old Telegram text is pruned using `GANG_RETENTION_DAYS` (default 35); pruning is not secure deletion.
-- `workspace/characters.json` stores each character's color, skin tone, hair, glasses, and display label. It is generated deterministically on first use and reused, with a guaranteed-distinct appearance per member. These stylized avatars are placeholders, not guesses about anyone's appearance, identity, gender, or ethnicity. An admin can override a member's display label in the Telegram bot with `/rename <name> <label>`.
+- `workspace/characters.json` stores each character's color, skin tone, hair, glasses, and display label. It is generated deterministically on first use and reused, with a guaranteed-distinct appearance per member. These stylized avatars are placeholders, not guesses about anyone's appearance, identity, gender, or ethnicity. A member who wants their character to resemble them may use `/setavatar`; that likeness is user-supplied and explicit, never inferred. An admin can override a member's display label in the Telegram bot with `/rename <name> <label>`.
+- `workspace/telegram/<chat id>/stats.json` holds the rolling aggregate ledger for `/wrapped` (per-member and per-day counts and top emoji; no raw text). It is not pruned by retention.
 - `workspace/memory.json` remembers used message fingerprints (exact and by text content) and the last week to reduce repeats. It is deduplication memory, not semantic memory of relationships or inside jokes. Every proposed moment is marked used when a draft is prepared. The local UI keeps its own data in `web-workspace`.
 - Use one workspace per group. Rerendering the same week replaces that edition folder. Prior downloaded or shared output files cannot be recalled.
 - To remove data, stop the app and delete that group's workspace folder, exports, media, plans, consent notes, and any downloaded copies you want removed. The app has no automatic retention scheduler for WhatsApp exports or UI data.
@@ -265,7 +307,7 @@ To choose a style, pass it in the command (`/comic cloud marvel`) or set the gro
 - Exports, plans, transcripts, images, consent notes, Telegram state, and memory are ordinary local files, **not encrypted**. Keep them off shared cloud folders. `.env` and workspaces are ignored by Git, but you are responsible for backups and any other copies.
 - Sensitive filtering is a limited English keyword/number heuristic, not a reliable privacy or safety classifier. A human must review every candidate in every language.
 - The WhatsApp parser supports common Android/iOS text formats, not every export variant. Inspect warnings and source IDs. WhatsApp timestamps are not timezone-converted.
-- Automatic image understanding (vision) in offline mode, automatic speech transcription in offline mode, real likeness generation, and video output are not implemented. The sample `.opus` file is a labeled placeholder, not playable voice audio. This build creates an illustrated quote recap, not generated scenes retelling a continuous story.
+- Automatic image understanding (vision) in offline mode, automatic speech transcription in offline mode, and video output are not implemented. Likeness generation is available only as the explicit opt-in `/setavatar` path (see above), which is cloud-only. The sample `.opus` file is a labeled placeholder, not playable voice audio. This build creates an illustrated quote recap, not generated scenes retelling a continuous story.
 - English/Latin layout is visually tested. Hebrew/Arabic bidirectional layout and every locale/export variant are **not certified**; test before a presentation.
 
 ## First-run troubleshooting
@@ -292,7 +334,7 @@ A command-only group view is the usual sign that privacy mode remains enabled or
 
 - **The bot does not answer commands:** check that the `telegram-run` terminal is still running, the token belongs to this bot, and it is in the group. Commands from members are collected only when the bot receives them.
 - **`At least two members must opt in`:** at least two group members must each send `/consent` in the group before an admin runs `/comic`.
-- **Cloud request is blocked:** cloud mode requires an API key and the separate `/cloudok` permission from every opted-in member; the provider URL/model must also be compatible. For an offline comic, use `/comic` without `cloud`.
+- **Cloud request is blocked:** cloud mode requires an API key and the separate `/cloudok` permission from every opted-in member; the provider URL/model must also be compatible. For an offline comic, use `/comic offline`.
 - **A pending draft disappeared:** a new `/consent`, `/cloudok`, `/cloudno`, or `/revoke` intentionally discards it. Run `/comic` again and review the fresh candidates.
 - **The bot missed older messages:** Telegram only retains pending updates for about 24 hours. Restart the bot and continue with messages it can still receive; older missed messages cannot be restored by this app.
 
@@ -308,15 +350,18 @@ Tests cover parser variants, media sidecars, consent and silent-member gates, so
 ## Project map
 
 - `gang_edition/core.py`: export parser, consent, moment selection, memory, character sheets, optional chat API.
-- `gang_edition/render.py`: the local comic renderer with style themes, speech bubbles, and avatars.
+- `gang_edition/stats.py`: rolling aggregate stats ledger (per-member/per-day counts, top emoji).
+- `gang_edition/wrapped.py`: period resolution and deterministic awards for Gang Wrapped.
+- `gang_edition/render.py`: the local comic renderer with style themes, speech bubbles, avatars, and the Wrapped page.
 - `gang_edition/styles.py`: comic style definitions (marvel, dc, ghibli, cartoon).
-- `gang_edition/img.py`: optional image generation via OpenRouter (Seedream 5.0).
+- `gang_edition/img.py`: optional image generation via OpenRouter (Seedream 5.0) and avatar stylization.
 - `gang_edition/telegram.py`: Telegram Bot API client, opt-in consent, commands, polling, and fake API for tests/demo.
 - `gang_edition/app.py`: CLI, `.env` reader, and edition workflow.
 - `gang_edition/web.py`: minimal local import/review/download UI.
 - `sample/`: fictional export, consent, and local media sidecars.
 - `tests/`: runnable regression tests.
 - `preview/`: synthetic edition and UI screenshots.
+- `docs/ROADMAP.md`: product roadmap.
 
 ## Possible next steps for the full idea
 

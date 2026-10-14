@@ -31,9 +31,13 @@ HELP = (
     "/status - what the bot has stored\n"
     "/transcript <text> - reply to your own voice message with its transcript\n"
     "/describe <text> - reply to your own photo with a description\n"
+    "/setavatar - reply to your own photo to use your likeness (needs /cloudok)\n"
+    "/clearavatar - remove your likeness avatar\n"
     "/styles - list available comic styles\n"
-    "Admins: /comic [YYYY-MM-DD] [cloud] [style] picks moments for review, /approve [numbers] draws and posts, "
-    "/style <name> sets the default style, /rename <name> <label> gives a member a display name."
+    "Admins: /comic [YYYY-MM-DD] [style] picks moments for review (cloud by default; add 'offline' for local), /approve [numbers] draws and posts, "
+    "/autopost on|off posts automatically without the review step, "
+    "/style <name> sets the default style, /rename <name> <label> gives a member a display name, "
+    "/wrapped [year|all] makes a recap of the group's stats and awards."
 )
 
 PRIVACY_WARNING = (
@@ -159,6 +163,17 @@ class Store:
                 out.append({'chat_id': s['chat_id'], 'title': s.get('title', ''), 'members': len(s['members']), 'messages': len(s['messages'])})
         return out
 
+    def stats_path(self, chat_id):
+        return self.dir(chat_id) / 'stats.json'
+
+    def load_stats(self, chat_id):
+        from .stats import empty_stats
+        p = self.stats_path(chat_id)
+        return load(p) if p.exists() else empty_stats()
+
+    def save_stats(self, chat_id, stats):
+        save(self.stats_path(chat_id), stats)
+
 
 def unique_names(members):
     names, count = {}, {}
@@ -183,6 +198,9 @@ def build_inputs(state):
                  'evidence': f"Telegram /consent by user id {uid} at {m['granted_at']}"}
         if m.get('label'):
             entry['label'] = m['label']
+        if m.get('avatar'):
+            entry['avatar'] = m['avatar']
+            entry['likeness'] = True
         consent['members'][names[uid]] = entry
     msgs = []
     for m in sorted((x for x in state['messages'] if str(x['user_id']) in members), key=lambda x: (x['timestamp'], x['tg_id'])):
@@ -249,6 +267,7 @@ class Bot:
         elif 'voice' in msg or 'audio' in msg:
             v = msg.get('voice') or msg['audio']
             state['messages'].append(self.record(msg, user, '', 'voice', file_id=v['file_id']))
+            self._bump_stats(state, user, 'voice', '', iso(msg['date']))
         elif 'photo' in msg or 'video' in msg or 'video_note' in msg:
             if 'photo' in msg:
                 file_id = msg['photo'][-1]['file_id']; kind = 'photo'
@@ -257,9 +276,18 @@ class Bot:
             else:
                 file_id = msg['video_note']['file_id']; kind = 'video'
             state['messages'].append(self.record(msg, user, msg.get('caption', ''), kind, file_id=file_id))
+            self._bump_stats(state, user, kind, msg.get('caption', ''), iso(msg['date']))
         elif text:
             state['messages'].append(self.record(msg, user, text, 'text'))
+            self._bump_stats(state, user, 'text', text, iso(msg['date']))
         self.store.save(state)
+
+    def _bump_stats(self, state, user, kind, text, ts):
+        from .stats import apply_message
+        names = unique_names(state['members'])
+        stats = self.store.load_stats(state['chat_id'])
+        apply_message(stats, {'author': names.get(user, str(user)), 'text': text, 'timestamp': ts, 'kind': kind})
+        self.store.save_stats(state['chat_id'], stats)
 
     @staticmethod
     def record(msg, user, text, kind, file_id=None):
@@ -303,6 +331,9 @@ class Bot:
             state['members'].pop(uid, None)
             state['messages'] = [m for m in state['messages'] if str(m['user_id']) != uid]
             state['pending'] = None
+            avatars_dir = self.store.dir(state['chat_id']) / 'avatars'
+            for suffix in ('.jpg', '.png'):
+                (avatars_dir / f'{uid}{suffix}').unlink(missing_ok=True)
             self.store.save(state)
             return reply('Done. Your opt-in and stored messages are deleted. Characters already drawn in past comics are not recalled.')
         if cmd in ('cloudok', 'cloudno'):
@@ -322,9 +353,15 @@ class Bot:
             if not self.api.is_admin(chat['id'], user['id']):
                 return reply('Only group admins can run /style and /rename.')
             return self.style(state, arg, reply) if cmd == 'style' else self.rename(state, arg, reply)
+        if cmd == 'autopost':
+            if not self.api.is_admin(chat['id'], user['id']):
+                return reply('Only group admins can run /autopost.')
+            return self.autopost(state, arg, reply)
         if cmd == 'status':
             mine = sum(1 for m in state['messages'] if str(m['user_id']) == uid)
             out = f"Opted-in members: {len(state['members'])}. Stored messages: {len(state['messages'])} (yours: {mine}). Retention: {self.store.retention_days} days."
+            if state.get('autopost'):
+                out += '\nAuto-post is ON: /comic posts without the review step.'
             if not state['seen_plain']:
                 out += '\n' + PRIVACY_WARNING
             return reply(out)
@@ -337,27 +374,51 @@ class Bot:
             target_msg['media_note'] = 'supplied transcript' if cmd == 'transcript' else 'supplied image description'
             self.store.save(state)
             return reply('Saved. It will only be used if you stay opted in.')
+        if cmd in ('setavatar', 'clearavatar'):
+            if not member or not member.get('local_processing') or not member.get('comic_portrayal'):
+                return reply('Send /consent first.')
+            return self.avatar(state, msg, arg, reply, cmd)
         if cmd in ('comic', 'approve'):
             if not self.api.is_admin(chat['id'], user['id']):
                 return reply('Only group admins can run /comic and /approve.')
             return self.comic(state, msg, arg, reply) if cmd == 'comic' else self.approve(state, msg, arg, reply)
+        if cmd == 'wrapped':
+            if not self.api.is_admin(chat['id'], user['id']):
+                return reply('Only group admins can run /wrapped.')
+            return self.wrapped(state, arg, reply)
 
     def comic(self, state, msg, arg, reply):
         from .core import week_start
         words = arg.split()
         lower = [w.lower() for w in words]
-        cloud = 'cloud' in lower
+        explicit_cloud = 'cloud' in lower
+        offline = 'offline' in lower
+        cloud = explicit_cloud or not offline  # cloud is the default
         style_key = next((w for w in lower if w in STYLES), None)
         try:
             style = effective_style(style_key, state.get('style'))
         except ValueError as e:
             return reply(f'Blocked: {e}')
         date = next((w for w in words if re.fullmatch(r'\d{4}-\d{2}-\d{2}', w)), iso(msg['date'])[:10])
-        art_mode = 'image' if (cloud and os.getenv('GANG_IMG_API_KEY')) else 'procedural'
+        fallback = ''
+        art_mode = 'procedural'
         try:
             parsed, consent = build_inputs(state)
             if cloud:
-                check_consent(parsed, consent, True)
+                if not os.getenv('GANG_LLM_API_KEY'):
+                    if explicit_cloud:
+                        raise GateError('Cloud mode needs GANG_LLM_API_KEY; run /comic offline instead.')
+                    cloud = False
+                    fallback = ' (no LLM key; used offline selection)'
+                else:
+                    try:
+                        check_consent(parsed, consent, True)
+                    except GateError:
+                        if explicit_cloud:
+                            raise
+                        cloud = False
+                        fallback = ' (not every member allowed cloud; used offline selection)'
+            if cloud:
                 by_tg = {m['tg_id']: m for m in state['messages']}
                 for m in parsed['messages']:
                     if m['_kind'] == 'voice' and not m['text'].strip():
@@ -374,6 +435,7 @@ class Bot:
                             m['text'] = describe_image(self.api.download(src['file_id']))
                             m['media_only'] = not m['text']
                             m['media_note'] = 'provider image description'
+            art_mode = 'image' if (cloud and os.getenv('GANG_IMG_API_KEY')) else 'procedural'
             plan = prepare(parsed, consent, date, self.memory(state), cloud)
             plan['style'] = style.key
             plan['art_mode'] = art_mode
@@ -386,8 +448,18 @@ class Bot:
             return reply(f'Blocked: {e}')
         state['pending'] = {'parsed': parsed, 'consent': consent, 'plan': plan}
         self.store.save(state)
+        if state.get('autopost'):
+            plan['approved'] = True
+            try:
+                _, consent_now = build_inputs(state)
+                self.post_edition(state, plan, parsed, consent_now)
+            except (GateError, ValueError, IndexError, OSError) as e:
+                return reply(f'Blocked: {e}')
+            state['pending'] = None
+            self.store.save(state)
+            return reply(f'Auto-posted this week\'s comic ({plan["mode"]} picking, {style.name} style).')
         art = 'AI image' if art_mode == 'image' else 'local drawing'
-        lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking, {style.name} style, {art}). * = proposed."]
+        lines = [f"Draft for the week of {plan['week']} ({plan['mode']} picking, {style.name} style, {art}). * = proposed." + fallback]
         if plan.get('title') and plan['title'] != 'The Gang Edition':
             lines.append(f"Title: {plan['title']}")
         for i, c in enumerate(plan['candidates'][:12], 1):
@@ -424,9 +496,82 @@ class Bot:
         self.store.save(state)
         return reply(f'{state["members"][uid].get("name", name)} will be shown as "{label}" in future comics.')
 
+    def autopost(self, state, arg, reply):
+        arg = arg.strip().lower()
+        if arg in ('on', '1', 'yes', 'true', 'enable'):
+            state['autopost'] = True
+        elif arg in ('off', '0', 'no', 'false', 'disable'):
+            state['autopost'] = False
+        else:
+            cur = state.get('autopost', False)
+            return reply('Auto-post is ' + ('ON' if cur else 'OFF') + '. /autopost on|off. When ON, /comic posts the comic right away (no /approve step).')
+        self.store.save(state)
+        return reply('Auto-post ' + ('enabled: /comic will post without the review step.' if state['autopost'] else 'disabled.'))
+
     def memory(self, state):
         p = self.store.dir(state['chat_id']) / 'memory.json'
         return load(p) if p.exists() else {}
+
+    def avatar(self, state, msg, arg, reply, cmd):
+        uid = str(msg['from']['id'])
+        avatars_dir = self.store.dir(state['chat_id']) / 'avatars'
+        if cmd == 'clearavatar':
+            for suffix in ('.jpg', '.png'):
+                (avatars_dir / f'{uid}{suffix}').unlink(missing_ok=True)
+            member = state['members'][uid]
+            member.pop('avatar', None)
+            member.pop('likeness', None)
+            state['pending'] = None
+            self.store.save(state)
+            return reply('Avatar removed.')
+        member = state['members'][uid]
+        if not member.get('cloud_processing'):
+            return reply('Send /cloudok first: stylizing your photo sends it to the configured image provider.')
+        if not os.getenv('GANG_IMG_API_KEY'):
+            return reply('Image generation is not configured (GANG_IMG_API_KEY).')
+        src = (msg.get('reply_to_message') or {}).get('message_id')
+        target = next((m for m in state['messages'] if m.get('tg_id') == src and str(m.get('user_id')) == uid), None)
+        if not target or target.get('kind') != 'photo' or not target.get('file_id'):
+            return reply('Reply to YOUR OWN photo with /setavatar.')
+        data = self.api.download(target['file_id'])
+        avatars_dir.mkdir(parents=True, exist_ok=True)
+        raw = avatars_dir / f'{uid}.jpg'
+        raw.write_bytes(data)
+        style_key = state.get('style') or os.getenv('GANG_DEFAULT_STYLE') or DEFAULT_STYLE
+        from .img import stylize_avatar
+        try:
+            png = stylize_avatar(data, style_key)
+        except (GateError, ValueError, OSError, urllib.error.URLError) as e:
+            raw.unlink(missing_ok=True)
+            return reply(f'Blocked: {e}')
+        (avatars_dir / f'{uid}.png').write_bytes(png)
+        member['avatar'] = f'avatars/{uid}.png'
+        member['likeness'] = True
+        state['pending'] = None
+        self.store.save(state)
+        return reply('Avatar set from your photo. /clearavatar removes it.')
+
+    def wrapped(self, state, arg, reply):
+        from .wrapped import compute_awards
+        from .render import render_wrapped
+        from .core import character_sheet
+        try:
+            parsed, consent = build_inputs(state)
+        except (GateError, ValueError) as e:
+            return reply(f'Blocked: {e}')
+        stats = self.store.load_stats(state['chat_id'])
+        result = compute_awards(stats, arg or 'year')
+        cpath = self.store.dir(state['chat_id']) / 'characters.json'
+        existing = load(cpath) if cpath.exists() else {}
+        sheet = character_sheet(consent['members'], existing)
+        style = effective_style(state.get('style'))
+        out = self.store.dir(state['chat_id']) / 'wrapped'
+        png = render_wrapped(result, sheet, out, style, avatars_dir=self.store.dir(state['chat_id']) / 'avatars')
+        self.api.send_photo(state['chat_id'], png, f'Gang Wrapped — {result["label"]}')
+        lines = [f'{a["award"]}: {a["name"]} — {a["detail"]}' for a in result['awards']]
+        if lines:
+            self.api.send_message(state['chat_id'], '\n'.join(lines))
+        return
 
     def consume(self, state, messages):
         if not messages:
@@ -438,7 +583,6 @@ class Bot:
         save(p, memory)
 
     def approve(self, state, msg, arg, reply):
-        from .app import finish
         pend = state.get('pending')
         if not pend:
             return reply('Nothing to approve. Run /comic first.')
@@ -458,11 +602,15 @@ class Bot:
         plan['approved'] = True
         try:
             _, consent_now = build_inputs(state)  # latest opt-ins: any change blocks the old draft
-            out = finish(pend['parsed'], consent_now, plan, self.store.dir(state['chat_id']), self.store.dir(state['chat_id']))
+            self.post_edition(state, plan, pend['parsed'], consent_now)
         except (GateError, ValueError, IndexError, OSError) as e:
             return reply(f'Blocked: {e}')
         state['pending'] = None
         self.store.save(state)
+
+    def post_edition(self, state, plan, parsed, consent):
+        from .app import finish
+        out = finish(parsed, consent, plan, self.store.dir(state['chat_id']), self.store.dir(state['chat_id']))
         pngs = sorted(out.glob('comic-*.png'))
         if not pngs:
             pngs = [out / 'comic.png']
@@ -472,6 +620,7 @@ class Bot:
                 caption += f' ({idx}/{len(pngs)})'
             self.api.send_photo(state['chat_id'], p, caption)
         self.api.send_document(state['chat_id'], out / 'comic.pdf', 'Printable page')
+        return out
 
 
 def run(workspace='workspace', token=None):

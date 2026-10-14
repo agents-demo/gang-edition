@@ -96,17 +96,34 @@ def build_page_prompt(chosen, sheet, style, names, include_text=True, title='The
     return '\n'.join(lines)
 
 
-def _reference_data_urls(sheet, names):
-    from .render import character_card
+def _reference_data_urls(sheet, names, avatars_dir=None):
+    from .render import character_card, avatar_file
     refs = []
     for name in names:
+        char = sheet.get(name, {})
+        p = avatar_file(char, avatars_dir)
+        if p is not None:
+            refs.append('data:image/png;base64,' + base64.b64encode(p.read_bytes()).decode())
+            continue
         buf = io.BytesIO()
-        character_card(sheet.get(name, {})).save(buf, format='PNG')
+        character_card(char).save(buf, format='PNG')
         refs.append('data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode())
     return refs
 
 
-def render_image_page(chosen, sheet, plan, style, out):
+def stylize_avatar(photo_bytes, style_key='marvel', model=None, seed=None):
+    """Turn a member-supplied photo into a consistent cartoon portrait using the
+    configured image model. Returns PNG bytes. Requires GANG_IMG_API_KEY."""
+    if not os.getenv('GANG_IMG_API_KEY'):
+        raise GateError('GANG_IMG_API_KEY is not set; avatar stylization requires image generation.')
+    ref = 'data:image/jpeg;base64,' + base64.b64encode(photo_bytes).decode()
+    prompt = (f'Turn this photo into a consistent {style_key}-style cartoon character portrait, '
+              'head and shoulders, same face and hairstyle, simple flat background, '
+              'suitable as a recurring comic character reference.')
+    return generate_image(prompt, refs=[ref], model=model, resolution='1K', aspect_ratio='1:1', seed=seed)
+
+
+def render_image_page(chosen, sheet, plan, style, out, avatars_dir=None):
     from PIL import Image
     from .core import PANELS_PER_PAGE, digest
     from .render import save_pages, overlay_page
@@ -114,7 +131,7 @@ def render_image_page(chosen, sheet, plan, style, out):
     resolution = os.getenv('GANG_IMG_RESOLUTION', '2K')
     aspect_ratio = os.getenv('GANG_IMG_ASPECT_RATIO', '2:3')
     names = sorted({m['author'] for m in chosen})
-    refs = _reference_data_urls(sheet, names)
+    refs = _reference_data_urls(sheet, names, avatars_dir)
     base_seed = int(digest([plan.get('week', ''), style.key, names])[:8], 16) if names else None
     pages = []
     for page_idx, i in enumerate(range(0, len(chosen), PANELS_PER_PAGE)):
@@ -126,6 +143,7 @@ def render_image_page(chosen, sheet, plan, style, out):
         image = Image.open(io.BytesIO(png)).convert('RGB')
         if hybrid:
             image = overlay_page(image, chunk, sheet, plan['week'], style,
-                                 title=plan.get('title', 'The Gang Edition'), summary=plan.get('summary', 'A week worth keeping'))
+                                 title=plan.get('title', 'The Gang Edition'), summary=plan.get('summary', 'A week worth keeping'),
+                                 avatars_dir=avatars_dir)
         pages.append(image)
     return save_pages(pages, out)

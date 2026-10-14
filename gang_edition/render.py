@@ -90,6 +90,35 @@ def character_card(character, size=384):
     return image
 
 
+def avatar_file(character, avatars_dir):
+    """Return the resolved avatar image path for a character, or None."""
+    if not character or not avatars_dir:
+        return None
+    name = character.get('avatar')
+    if not name:
+        return None
+    p = Path(avatars_dir) / Path(str(name)).name
+    return p if p.is_file() else None
+
+
+def _avatar_image(character, avatars_dir):
+    p = avatar_file(character, avatars_dir)
+    if p is None:
+        return None
+    try:
+        return Image.open(p).convert('RGB')
+    except OSError:
+        return None
+
+
+def paste_avatar(image, avatar, cx, cy, r):
+    size = 2 * r
+    thumb = ImageOps.fit(avatar, (size, size), centering=(0.5, 0.35))
+    mask = Image.new('L', (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+    image.paste(thumb, (cx - r, cy - r), mask)
+
+
 def name_chip(draw, x, y, character, label, ink):
     face = font(20, 'DejaVuSans-Bold.ttf')
     tw = draw.textlength(label, font=face)
@@ -142,7 +171,7 @@ def _fit_text(draw, text, face, width):
     return text + '...'
 
 
-def build_page(messages, sheet, week, media_dir, style=None, background=None, title='The Gang Edition', summary='A week worth keeping'):
+def build_page(messages, sheet, week, media_dir, style=None, background=None, title='The Gang Edition', summary='A week worth keeping', avatars_dir=None):
     style = style or effective_style()
     height = 415 + 495 * ((len(messages) + 1) // 2)
     image = Image.new('RGB', (1400, height), style.page_bg)
@@ -177,7 +206,11 @@ def build_page(messages, sheet, week, media_dir, style=None, background=None, ti
                   font=font(20, style.body_bold), fill=style.subtitle_color)
         name_chip(draw, x + 20, y + 44, character, character.get('label', msg['author']), style.ink)
         speech_bubble(draw, x + 20, y + 88, w - 40, 250, msg['text'], body, style, (x + 42, y + 372))
-        portrait(draw, x + 80, y + 410, 40, character, style.ink)
+        avatar = _avatar_image(character, avatars_dir)
+        if avatar is not None:
+            paste_avatar(image, avatar, x + 80, y + 410, 40)
+        else:
+            portrait(draw, x + 80, y + 410, 40, character, style.ink)
         attachment = msg.get('attachment')
         if media_dir and attachment and Path(attachment).suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp'):
             p = safe_media(media_dir, attachment)
@@ -186,14 +219,14 @@ def build_page(messages, sheet, week, media_dir, style=None, background=None, ti
                     photo = ImageOps.fit(photo.convert('RGB'), (96, 72))
                 image.paste(photo, (x + w - 120, y + 386))
     draw.line((70, height - 120, 1330, height - 120), fill=style.accent, width=2)
-    draw.text((74, height - 96), 'Recurring cast, not inferred likenesses. No invented events. Share only with permission.',
+    draw.text((74, height - 96), 'Recurring cast. Likenesses only where a member opted in. No invented events. Share only with permission.',
               font=font(21, style.body_font), fill=style.subtitle_color)
     return image
 
 
-def render_page(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping'):
+def render_page(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping', avatars_dir=None):
     style = style or effective_style()
-    image = build_page(messages, sheet, week, media_dir, style, title=title, summary=summary)
+    image = build_page(messages, sheet, week, media_dir, style, title=title, summary=summary, avatars_dir=avatars_dir)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     image.save(out / 'comic.png')
@@ -221,12 +254,76 @@ def save_pages(pages, out):
     return pngs
 
 
-def render_pages(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping'):
+def render_pages(messages, sheet, week, out, media_dir, style=None, title='The Gang Edition', summary='A week worth keeping', avatars_dir=None):
     style = style or effective_style()
-    pages = [build_page(chunk, sheet, week, media_dir, style, title=title, summary=summary) for chunk in _chunks(messages)]
+    pages = [build_page(chunk, sheet, week, media_dir, style, title=title, summary=summary, avatars_dir=avatars_dir) for chunk in _chunks(messages)]
     return save_pages(pages, out)
 
 
-def overlay_page(art, messages, sheet, week, style=None, title='The Gang Edition', summary='A week worth keeping'):
+def overlay_page(art, messages, sheet, week, style=None, title='The Gang Edition', summary='A week worth keeping', avatars_dir=None):
     style = style or effective_style()
-    return build_page(messages, sheet, week, None, style, background=art, title=title, summary=summary)
+    return build_page(messages, sheet, week, None, style, background=art, title=title, summary=summary, avatars_dir=avatars_dir)
+
+
+def build_wrapped_page(result, sheet, style, avatars_dir=None):
+    style = style or effective_style()
+    summary = result['summary']
+    awards = result['awards']
+    label = result['label']
+    height = 380 + (56 if awards else 0) + len(awards) * 96 + 90
+    image = Image.new('RGB', (1400, max(height, 700)), style.page_bg)
+    draw = ImageDraw.Draw(image)
+
+    if style.halftone:
+        halftone(draw, 0, 20, 1400, 48, style.accent, spacing=13, radius=3)
+    title_face = _fit_title(draw, style, 'Gang Wrapped')
+    draw.text((70, 60), 'Gang Wrapped', font=title_face, fill=style.title_color)
+    sub = f'{label}  |  private recap of the group\'s own messages'
+    if summary.get('top_emoji'):
+        sub += f'  |  top emoji: {summary["top_emoji"]}'
+    draw.text((74, 150), _fit_text(draw, sub, font(24, style.body_font), 1250), font=font(24, style.body_font), fill=style.subtitle_color)
+
+    stats = [
+        ('Messages', str(summary['messages'])),
+        ('Words', str(summary['words'])),
+        ('Photos', str(summary['photos'])),
+        ('Voice notes', str(summary['voice'])),
+        ('Members', str(summary['active_members'])),
+        ('Busiest day', summary['busiest_day'] or '—'),
+    ]
+    box_w, gap, x, y = 170, 25, 70, 210
+    for name, value in stats:
+        draw.rounded_rectangle((x, y, x + box_w, y + 110), radius=14, fill=style.panel_bg, outline=style.panel_border, width=3)
+        draw.text((x + 18, y + 18), name, font=font(22, style.body_font), fill=style.subtitle_color)
+        draw.text((x + 18, y + 50), _fit_text(draw, str(value), font(40, style.body_bold), box_w - 36), font=font(40, style.body_bold), fill=style.ink)
+        x += box_w + gap
+    draw.line((70, 350, 1330, 350), fill=style.ink, width=3)
+
+    ay = 380
+    if awards:
+        draw.text((74, ay), 'Awards', font=font(34, style.body_bold), fill=style.title_color)
+        ay += 56
+    for aw in awards:
+        character = sheet.get(aw['name'], {'label': aw['name']})
+        avatar = _avatar_image(character, avatars_dir)
+        if avatar is not None:
+            paste_avatar(image, avatar, 120, ay + 34, 34)
+        else:
+            portrait(draw, 120, ay + 34, 34, character, style.ink)
+        draw.text((200, ay), aw['award'], font=font(30, style.body_bold), fill=style.ink)
+        label_name = character.get('label', aw['name'])
+        draw.text((200, ay + 42), f'{label_name} — {aw["detail"]}', font=font(26, style.body_font), fill=style.subtitle_color)
+        ay += 96
+    draw.text((74, ay + 20), 'Recap based on the group\'s own messages. Share only with permission.',
+              font=font(21, style.body_font), fill=style.subtitle_color)
+    return image
+
+
+def render_wrapped(result, sheet, out, style=None, avatars_dir=None):
+    style = style or effective_style()
+    image = build_wrapped_page(result, sheet, style, avatars_dir)
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    image.save(out / 'wrapped.png')
+    image.save(out / 'wrapped.pdf', 'PDF', resolution=150)
+    return out / 'wrapped.png'

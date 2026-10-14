@@ -294,7 +294,8 @@ def character_sheet(members, existing):
 
     result = {}
     for name in sorted(grants):
-        label = grants[name].get('label', name) if isinstance(grants[name], dict) else name
+        grant = grants[name] if isinstance(grants[name], dict) else {}
+        label = grant.get('label', name)
         prior = existing.get(name)
         if prior is not None and _appearance_key(prior) not in assigned:
             assigned[_appearance_key(prior)] = True
@@ -302,4 +303,10 @@ def character_sheet(members, existing):
         else:
             result[name] = fresh_look()
         result[name]['label'] = label
+        if grant.get('avatar'):
+            result[name]['avatar'] = grant['avatar']
+            result[name]['likeness'] = True
+        else:
+            result[name].pop('avatar', None)
+            result[name].pop('likeness', None)
     return result

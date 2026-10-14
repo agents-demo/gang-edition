@@ -28,9 +28,9 @@ def finish(parsed,consent,plan,workspace,media_dir):
         plan['title']=meta['title'];plan['summary']=meta['summary'];plan['title_source_ids']=list(chosen_ids)
     if plan.get('art_mode')=='image':
         from .img import render_image_page
-        render_image_page(chosen,sheet,plan,style,out)
+        render_image_page(chosen,sheet,plan,style,out,avatars_dir=workspace/'avatars')
     else:
-        render_pages(chosen,sheet,plan['week'],out,media_dir,style,title=plan.get('title','The Gang Edition'),summary=plan.get('summary','A week worth keeping'))
+        render_pages(chosen,sheet,plan['week'],out,media_dir,style,title=plan.get('title','The Gang Edition'),summary=plan.get('summary','A week worth keeping'),avatars_dir=workspace/'avatars')
     save(out/'sources.json',chosen)
     save(out/'reviewed-plan.json',plan)
     (out/'transcript.txt').write_text('\n\n'.join(f"{m['timestamp']} | {m['author']}\n{m['text']}" for m in chosen),encoding='utf-8')
@@ -75,6 +75,8 @@ def main():
     tr=sub.add_parser('telegram-run',help='Run the Telegram group bot (long polling; needs TELEGRAM_BOT_TOKEN in .env)');tr.add_argument('--workspace',default='workspace')
     td=sub.add_parser('telegram-demo',help='Replay a synthetic group through the Telegram handler with a fake API (no network)');td.add_argument('--workspace',default='telegram-demo-workspace')
     tg=sub.add_parser('telegram-groups',help='List groups the bot has collected');tg.add_argument('--workspace',default='workspace')
+    wr=sub.add_parser('wrapped',help='Render a Gang Wrapped stats/awards recap for a collected Telegram group')
+    wr.add_argument('--chat-id',required=True);wr.add_argument('--workspace',default='workspace');wr.add_argument('--period',default='year')
     for name in ('telegram-prepare','telegram-render'):
         c=sub.add_parser(name);c.add_argument('--chat-id',required=True);c.add_argument('--workspace',default='workspace');c.add_argument('--plan',required=True)
         if name=='telegram-prepare':
@@ -96,6 +98,27 @@ def main():
         if args.command=='telegram-groups':
             from .telegram import Store
             for g in Store(args.workspace).groups(): print(g)
+            return
+        if args.command=='wrapped':
+            from .telegram import Store,build_inputs
+            from .wrapped import compute_awards
+            from .render import render_wrapped
+            from .styles import effective_style
+            store=Store(args.workspace)
+            chat_id=args.chat_id if not args.chat_id.lstrip('-').isdigit() else int(args.chat_id)
+            state=store.state(chat_id)
+            parsed,consent=build_inputs(state)
+            stats=store.load_stats(state['chat_id'])
+            result=compute_awards(stats,args.period)
+            cpath=store.dir(state['chat_id'])/'characters.json'
+            existing=load(cpath) if cpath.exists() else {}
+            sheet=character_sheet(consent['members'],existing)
+            style=effective_style(state.get('style'))
+            out=store.dir(state['chat_id'])/'wrapped'
+            render_wrapped(result,sheet,out,style,avatars_dir=store.dir(state['chat_id'])/'avatars')
+            awards=', '.join(f'{a["award"]}: {a["name"]}' for a in result['awards']) or 'no awards yet'
+            print(f"Gang Wrapped ({result['label']}): {awards}")
+            print(f'Saved under {out}')
             return
         if args.command in ('telegram-prepare','telegram-render'):
             from .telegram import Store,build_inputs

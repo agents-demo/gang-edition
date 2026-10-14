@@ -156,4 +156,94 @@ class T(unittest.TestCase):
         parsed=prep.call_args.args[0]
         photo=next(m for m in parsed['messages'] if m.get('media_note')=='provider image description')
         self.assertEqual(photo['text'],'A group selfie at dinner.')
+    def test_setavatar_needs_cloudok(self):
+        self.optin(1,2);vid=self.say(1,'',photo=[{'file_id':'p1'}]);self.say(2,'second')
+        self.say(1,'/setavatar',reply=vid)
+        self.assertIn('cloudok',self.api.texts()[-1])
+        self.assertNotIn('avatar',self.st()['members']['1'])
+    def test_setavatar_flow(self):
+        self.optin(1,2);self.say(1,'/cloudok');vid=self.say(1,'',photo=[{'file_id':'p1'}]);self.say(2,'second')
+        with patch.dict(os.environ,{'GANG_IMG_API_KEY':'k'}), \
+             patch('gang_edition.img.stylize_avatar',return_value=b'\x89PNG-fake') as styl, \
+             patch.object(self.api,'download',return_value=b'photobytes'):
+            self.say(1,'/setavatar',reply=vid)
+        self.assertIn('Avatar set',self.api.texts()[-1])
+        self.assertEqual(self.st()['members']['1']['avatar'],'avatars/1.png')
+        styl.assert_called_once()
+        av=self.store.dir(-100)/'avatars'
+        self.assertTrue((av/'1.jpg').exists());self.assertTrue((av/'1.png').exists())
+    def test_clearavatar_removes(self):
+        self.optin(1,2);self.say(1,'/cloudok');vid=self.say(1,'',photo=[{'file_id':'p1'}]);self.say(2,'second')
+        with patch.dict(os.environ,{'GANG_IMG_API_KEY':'k'}), \
+             patch('gang_edition.img.stylize_avatar',return_value=b'\x89PNG'), \
+             patch.object(self.api,'download',return_value=b'photobytes'):
+            self.say(1,'/setavatar',reply=vid)
+        self.assertIn('avatar',self.st()['members']['1'])
+        self.say(1,'/clearavatar')
+        self.assertNotIn('avatar',self.st()['members']['1'])
+        self.assertFalse((self.store.dir(-100)/'avatars'/'1.png').exists())
+    def test_revoke_deletes_avatar_files(self):
+        self.optin(1,2);self.say(1,'/cloudok');vid=self.say(1,'',photo=[{'file_id':'p1'}]);self.say(2,'second')
+        with patch.dict(os.environ,{'GANG_IMG_API_KEY':'k'}), \
+             patch('gang_edition.img.stylize_avatar',return_value=b'\x89PNG'), \
+             patch.object(self.api,'download',return_value=b'photobytes'):
+            self.say(1,'/setavatar',reply=vid)
+        self.assertTrue((self.store.dir(-100)/'avatars'/'1.png').exists())
+        self.say(1,'/revoke')
+        self.assertFalse((self.store.dir(-100)/'avatars'/'1.png').exists())
+        self.assertFalse((self.store.dir(-100)/'avatars'/'1.jpg').exists())
+    def test_wrapped_admin_only(self):
+        self.optin(1,2);self.say(1,'hello there friends');self.say(2,'hi there')
+        self.say(2,'/wrapped')
+        self.assertIn('Only group admins',self.api.texts()[-1])
+    def test_wrapped_posts_photo(self):
+        self.optin(1,2);self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        self.say(1,'/wrapped')
+        kinds=[s[0] for s in self.api.sent]
+        self.assertIn('photo',kinds)
+        self.assertTrue(Path([s for s in self.api.sent if s[0]=='photo'][0][2]).exists())
+    def test_stats_accumulate_on_messages(self):
+        self.optin(1,2);self.say(1,'hello there friends');self.say(2,'Finally won!!')
+        stats=self.store.load_stats(-100)
+        self.assertEqual(sum(stats['by_day'].values()),2)
+        self.assertEqual(sorted(stats['by_author']),['U1','U2'])
+    def test_comic_defaults_to_cloud(self):
+        self.optin(1,2);self.say(1,'/cloudok');self.say(2,'/cloudok')
+        self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        with patch.dict(os.environ,{'GANG_LLM_API_KEY':'k'}), \
+             patch('gang_edition.telegram.prepare',return_value={'week':'2026-10-05','mode':'cloud','candidates':[],'selected_ids':[],'title':'T','summary':'s'}) as prep:
+            self.say(1,'/comic')
+        self.assertEqual(prep.call_args.args[4],True)
+    def test_comic_offline_forces_local(self):
+        self.optin(1,2);self.say(1,'/cloudok');self.say(2,'/cloudok')
+        self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        with patch.dict(os.environ,{'GANG_LLM_API_KEY':'k'}), \
+             patch('gang_edition.telegram.prepare',return_value={'week':'2026-10-05','mode':'offline','candidates':[],'selected_ids':[],'title':'T','summary':'s'}) as prep:
+            self.say(1,'/comic offline')
+        self.assertEqual(prep.call_args.args[4],False)
+    def test_comic_falls_back_without_key(self):
+        self.optin(1,2);self.say(1,'/cloudok');self.say(2,'/cloudok')
+        self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        with patch.dict(os.environ,{},clear=True):
+            self.say(1,'/comic')
+        self.assertIn('offline selection',self.api.texts()[-1])
+        self.assertEqual(self.st()['pending']['plan']['mode'],'offline')
+    def test_autopost_admin_only(self):
+        self.optin(1,2);self.say(1,'hello there friends');self.say(2,'hi')
+        self.say(2,'/autopost on')
+        self.assertIn('Only group admins',self.api.texts()[-1])
+        self.assertNotIn('autopost',self.st())
+    def test_autopost_off_keeps_review(self):
+        self.optin(1,2);self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        self.say(1,'/comic')
+        self.assertIn('Draft for the week',self.api.texts()[-1])
+        self.assertFalse([s for s in self.api.sent if s[0]=='photo'])
+    def test_autopost_on_posts_without_approve(self):
+        self.optin(1,2);self.say(1,'Plot twist!!');self.say(2,'Finally won haha!')
+        self.say(1,'/autopost on')
+        self.say(1,'/comic')
+        kinds=[s[0] for s in self.api.sent]
+        self.assertIn('photo',kinds);self.assertIn('document',kinds)
+        self.assertIsNone(self.st()['pending'])
+        self.assertIn('Auto-posted',self.api.texts()[-1])
 if __name__=='__main__':unittest.main()
