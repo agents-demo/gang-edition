@@ -284,3 +284,21 @@ class TestImage(unittest.TestCase):
         refs = _reference_data_urls(sheet, ['A', 'B'])
         self.assertEqual(len(refs), 2)
         self.assertTrue(all(r.startswith('data:image/png;base64,') for r in refs))
+    def test_render_image_page_progress_callback(self):
+        import io, base64, os
+        from PIL import Image as PILImage
+        from gang_edition.img import render_image_page
+        from gang_edition.styles import resolve_style
+        buf = io.BytesIO(); PILImage.new('RGB', (10, 10), 'white').save(buf, format='PNG')
+        reply = {'data': [{'b64_json': base64.b64encode(buf.getvalue()).decode()}]}
+        sheet = character_sheet({'A': {}, 'B': {}}, {})
+        chosen = [{'author': 'A', 'text': f'm {i}', 'timestamp': '2026-10-05T00:00:00'} for i in range(7)]
+        plan = {'week': '2026-10-05', 'img_mode': 'full', 'title': 'T', 'summary': 's'}
+        calls = []
+        with patch.dict(os.environ, {'GANG_IMG_API_KEY': 'k', 'GANG_IMG_BASE_URL': 'https://example.invalid/api/v1', 'GANG_IMG_MODEL': 'm'}), \
+             patch('gang_edition.img.urllib.request.build_opener') as opener:
+            opener.return_value.open.side_effect = lambda *a, **k: io.BytesIO(json.dumps(reply).encode())
+            with tempfile.TemporaryDirectory() as d:
+                render_image_page(chosen, sheet, plan, resolve_style('cartoon'), d,
+                                  on_progress=lambda done, total: calls.append((done, total)))
+        self.assertEqual(calls, [(1, 2), (2, 2)])

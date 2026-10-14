@@ -123,7 +123,7 @@ def stylize_avatar(photo_bytes, style_key='marvel', model=None, seed=None):
     return generate_image(prompt, refs=[ref], model=model, resolution='1K', aspect_ratio='1:1', seed=seed)
 
 
-def render_image_page(chosen, sheet, plan, style, out, avatars_dir=None):
+def render_image_page(chosen, sheet, plan, style, out, avatars_dir=None, on_progress=None):
     from PIL import Image
     from .core import PANELS_PER_PAGE, digest
     from .render import save_pages, overlay_page
@@ -133,8 +133,11 @@ def render_image_page(chosen, sheet, plan, style, out, avatars_dir=None):
     names = sorted({m['author'] for m in chosen})
     refs = _reference_data_urls(sheet, names, avatars_dir)
     base_seed = int(digest([plan.get('week', ''), style.key, names])[:8], 16) if names else None
+    total_pages = (len(chosen) + PANELS_PER_PAGE - 1) // PANELS_PER_PAGE
     pages = []
     for page_idx, i in enumerate(range(0, len(chosen), PANELS_PER_PAGE)):
+        if on_progress:
+            on_progress(page_idx + 1, total_pages)
         chunk = chosen[i:i + PANELS_PER_PAGE]
         prompt = build_page_prompt(chunk, sheet, style, names, include_text=not hybrid,
                                    title=plan.get('title', 'The Gang Edition'))

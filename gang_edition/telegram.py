@@ -420,21 +420,24 @@ class Bot:
                         fallback = ' (not every member allowed cloud; used offline selection)'
             if cloud:
                 by_tg = {m['tg_id']: m for m in state['messages']}
-                for m in parsed['messages']:
-                    if m['_kind'] == 'voice' and not m['text'].strip():
-                        src = by_tg[m['_tg']]
-                        m['text'] = transcribe_voice(self.api, src['file_id'])
-                        m['media_only'] = not m['text']
-                        m['media_note'] = 'provider transcript'
+                voices = [m for m in parsed['messages'] if m['_kind'] == 'voice' and not m['text'].strip()]
+                if voices:
+                    reply(f'Transcribing {len(voices)} voice message(s)…')
+                for m in voices:
+                    src = by_tg[m['_tg']]
+                    m['text'] = transcribe_voice(self.api, src['file_id'])
+                    m['media_only'] = not m['text']
+                    m['media_note'] = 'provider transcript'
                 if os.getenv('GANG_IMG_READER_API_KEY') and os.getenv('GANG_IMG_READER_MODEL'):
-                    for m in parsed['messages']:
-                        if m['_kind'] == 'photo' and not m['text'].strip():
-                            src = by_tg[m['_tg']]
-                            if not src.get('file_id'):
-                                continue
-                            m['text'] = describe_image(self.api.download(src['file_id']))
-                            m['media_only'] = not m['text']
-                            m['media_note'] = 'provider image description'
+                    photos = [m for m in parsed['messages'] if m['_kind'] == 'photo' and not m['text'].strip() and by_tg[m['_tg']].get('file_id')]
+                    if photos:
+                        reply(f'Describing {len(photos)} photo(s)…')
+                    for m in photos:
+                        src = by_tg[m['_tg']]
+                        m['text'] = describe_image(self.api.download(src['file_id']))
+                        m['media_only'] = not m['text']
+                        m['media_note'] = 'provider image description'
+                reply('Picking the moments and writing the title…')
             art_mode = 'image' if (cloud and os.getenv('GANG_IMG_API_KEY')) else 'procedural'
             plan = prepare(parsed, consent, date, self.memory(state), cloud)
             plan['style'] = style.key
@@ -610,7 +613,13 @@ class Bot:
 
     def post_edition(self, state, plan, parsed, consent):
         from .app import finish
-        out = finish(parsed, consent, plan, self.store.dir(state['chat_id']), self.store.dir(state['chat_id']))
+        chat_id = state['chat_id']
+
+        def progress(done, total):
+            msg = 'Drawing the comic…' if total <= 1 else f'Drawing page {done} of {total}…'
+            self.api.send_message(chat_id, msg)
+
+        out = finish(parsed, consent, plan, self.store.dir(state['chat_id']), self.store.dir(state['chat_id']), on_progress=progress)
         pngs = sorted(out.glob('comic-*.png'))
         if not pngs:
             pngs = [out / 'comic.png']

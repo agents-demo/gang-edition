@@ -15,7 +15,7 @@ def read_source(chat, order, media_manifest=None, media_dir=None):
         enrich(parsed,load(media_manifest),media_dir or Path(chat).parent)
     return parsed
 
-def finish(parsed,consent,plan,workspace,media_dir):
+def finish(parsed,consent,plan,workspace,media_dir,on_progress=None):
     chosen=validate_plan(parsed,consent,plan)
     workspace=Path(workspace)
     sheet=character_sheet(consent['members'],load(workspace/'characters.json') if (workspace/'characters.json').exists() else {})
@@ -28,7 +28,7 @@ def finish(parsed,consent,plan,workspace,media_dir):
         plan['title']=meta['title'];plan['summary']=meta['summary'];plan['title_source_ids']=list(chosen_ids)
     if plan.get('art_mode')=='image':
         from .img import render_image_page
-        render_image_page(chosen,sheet,plan,style,out,avatars_dir=workspace/'avatars')
+        render_image_page(chosen,sheet,plan,style,out,avatars_dir=workspace/'avatars',on_progress=on_progress)
     else:
         render_pages(chosen,sheet,plan['week'],out,media_dir,style,title=plan.get('title','The Gang Edition'),summary=plan.get('summary','A week worth keeping'),avatars_dir=workspace/'avatars')
     save(out/'sources.json',chosen)
